@@ -1,0 +1,99 @@
+"""Pydantic schemas for request/response validation"""
+
+from datetime import datetime
+from typing import List, Optional
+from pydantic import BaseModel, Field, validator
+
+
+class MetricCreate(BaseModel):
+    """Schema for creating a single metric"""
+    metric_type: str = Field(..., description="Type of metric: cpu, memory, or request_count")
+    value: float = Field(..., description="Numeric value of the metric")
+    source: str = Field(..., description="Source identifier (e.g., server name)")
+    timestamp: Optional[datetime] = Field(default=None, description="Timestamp of metric (auto-generated if not provided)")
+
+    @validator('metric_type')
+    def validate_metric_type(cls, v):
+        """Validate metric_type is one of allowed values"""
+        # Server metrics
+        server_metrics = {"cpu", "memory", "request_count"}
+        # IoT sensor metrics
+        iot_metrics = {"temperature", "humidity", "soil_moisture", "light_intensity", "pressure"}
+        allowed = server_metrics | iot_metrics
+        if v not in allowed:
+            raise ValueError(f"metric_type must be one of {allowed}")
+        return v
+
+    @validator('value')
+    def validate_value(cls, v):
+        """Validate value is positive number"""
+        if v < 0:
+            raise ValueError("value must be non-negative")
+        if v > 1000000:
+            raise ValueError("value seems unreasonably large")
+        return v
+
+    @validator('source')
+    def validate_source(cls, v):
+        """Validate source is not empty"""
+        if not v or len(v.strip()) == 0:
+            raise ValueError("source cannot be empty")
+        return v.strip()
+
+
+class MetricBulkCreate(BaseModel):
+    """Schema for creating multiple metrics"""
+    metrics: List[MetricCreate] = Field(..., description="List of metrics to create")
+
+    @validator('metrics')
+    def validate_metrics(cls, v):
+        """Validate metrics list is not empty"""
+        if len(v) == 0:
+            raise ValueError("metrics list cannot be empty")
+        if len(v) > 1000:
+            raise ValueError("metrics list cannot exceed 1000 items")
+        return v
+
+
+class MetricResponse(BaseModel):
+    """Schema for metric response"""
+    id: int
+    metric_type: str
+    value: float
+    source: str
+    timestamp: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class LatestMetricsResponse(BaseModel):
+    """Schema for latest metrics response"""
+    latest_cpu: Optional[float] = None
+    latest_memory: Optional[float] = None
+    latest_request_count: Optional[float] = None
+    timestamp: datetime
+
+
+class SummaryMetricsResponse(BaseModel):
+    """Schema for summary metrics response"""
+    avg_cpu_1m: Optional[float] = None
+    avg_memory_1m: Optional[float] = None
+    total_request_count_1m: Optional[float] = None
+    latest_cpu: Optional[float] = None
+    latest_memory: Optional[float] = None
+    latest_request_count: Optional[float] = None
+    timestamp: datetime
+
+
+class MetricsHistoryResponse(BaseModel):
+    """Schema for metrics history response"""
+    metric_type: str
+    data: List[MetricResponse]
+    count: int
+
+
+class HealthResponse(BaseModel):
+    """Schema for health check response"""
+    status: str
+    message: str

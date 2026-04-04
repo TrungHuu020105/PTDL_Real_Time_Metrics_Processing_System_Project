@@ -1,0 +1,13 @@
+curl -X POST http://localhost:8000/api/metrics \
+  -H "Content-Type: application/json" \
+  -d '{
+    "metric_type": "temperature",
+    "value": 28.5,
+    "source": "sensor_1"
+  }'
+
+  curl -X POST "http://localhost:8000/api/dev/generate-iot-data?count=100"
+
+  curl "http://localhost:8000/api/metrics/history?metric_type=temperature&minutes=10"
+
+  curl "http://localhost:8000/api/metrics/history?metric_type=humidity&minutes=10"

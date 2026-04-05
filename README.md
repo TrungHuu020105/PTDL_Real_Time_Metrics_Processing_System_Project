@@ -119,6 +119,9 @@ cd frontend && npm install && npm run dev
 
 # Terminal 4: Generate test data (optional)
 python generate_iot_data.py --count 500 --spread-hours 24
+
+# chạy liên tục vưới terminal4
+python generate_iot_data.py --continuous --interval 2
 ```
 
 **Khi hoàn tất:**

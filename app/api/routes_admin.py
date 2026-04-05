@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import User
-from app.schemas import DeviceCreate, DeviceResponse, UserResponse
+from app.schemas import DeviceCreate, DeviceUpdate, DeviceResponse, UserResponse
 from app.api.routes_auth import get_current_user
 from app import crud
 
@@ -98,6 +98,27 @@ async def get_all_users(admin: User = Depends(verify_admin), db: Session = Depen
     }
 
 
+@router.delete("/users/{user_id}")
+async def delete_user(user_id: int, admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
+    """Admin deletes a user"""
+    # Prevent deleting self
+    if user_id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete yourself"
+        )
+    
+    success = crud.delete_user(db, user_id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    return {"message": "User deleted successfully"}
+
+
 # ============== DEVICE MANAGEMENT ==============
 
 @router.post("/devices", response_model=DeviceResponse, status_code=201)
@@ -137,6 +158,33 @@ async def delete_device(device_id: int, admin: User = Depends(verify_admin), db:
         )
     
     return {"message": "Device deleted successfully"}
+
+
+@router.put("/devices/{device_id}", response_model=DeviceResponse)
+async def update_device(device_id: int, device_update: DeviceUpdate, admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
+    """Update device information (name, device_type, location)"""
+    # Get the device first to check if it exists
+    db_device = crud.get_device_by_id(db, device_id)
+    if not db_device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Device not found"
+        )
+    
+    # Update only provided fields
+    if device_update.name is not None:
+        db_device.name = device_update.name
+    if device_update.device_type is not None:
+        db_device.device_type = device_update.device_type
+    if device_update.location is not None:
+        db_device.location = device_update.location
+    
+    db.commit()
+    db.refresh(db_device)
+    
+    return db_device
+
+
 
 
 # ============== DEVICE PERMISSIONS ==============

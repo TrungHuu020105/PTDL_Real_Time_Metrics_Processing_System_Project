@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { CheckCircle, XCircle, Plus, Trash2, Copy } from 'lucide-react'
+import { CheckCircle, XCircle, Plus, Trash2, Copy, Edit2, Check, X } from 'lucide-react'
 import api from '../api'
 import { useAuth } from '../context/AuthContext'
 
@@ -14,6 +14,8 @@ export default function AdminPanel() {
   const [userDevices, setUserDevices] = useState([])
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
+  const [editingDevice, setEditingDevice] = useState(null)
+  const [editName, setEditName] = useState('')
 
   // Fetch pending users
   const fetchPendingUsers = async () => {
@@ -78,6 +80,20 @@ export default function AdminPanel() {
     }
   }
 
+  // Delete user
+  const deleteUser = async (userId) => {
+    if (!confirm('Delete this user? This action cannot be undone.')) return
+    
+    try {
+      await api.delete(`/api/admin/users/${userId}`)
+      setMessage('User deleted successfully')
+      setSelectedUser(null)
+      fetchAllUsers()
+    } catch (error) {
+      setMessage('Failed to delete user: ' + error.response?.data?.detail)
+    }
+  }
+
   // Create device
   const createDevice = async () => {
     if (!newDevice.name || !newDevice.device_type || !newDevice.source) {
@@ -105,6 +121,18 @@ export default function AdminPanel() {
       fetchDevices()
     } catch (error) {
       setMessage('Failed to delete device: ' + error.response?.data?.detail)
+    }
+  }
+
+  // Update device
+  const updateDevice = async (deviceId, name, device_type, location) => {
+    try {
+      await api.put(`/api/admin/devices/${deviceId}`, { name, device_type, location })
+      setMessage('Device updated successfully')
+      setEditingDevice(null)
+      fetchDevices()
+    } catch (error) {
+      setMessage('Failed to update device: ' + error.response?.data?.detail)
     }
   }
 
@@ -252,8 +280,8 @@ export default function AdminPanel() {
                 fetchUserDevices(user.id)
               }}
             >
-              <div className="flex items-center justify-between">
-                <div>
+              <div className="flex items-center justify-between w-full">
+                <div className="flex-1">
                   <p className="text-white font-semibold">{user.username}</p>
                   <p className="text-sm text-gray-400">{user.email}</p>
                   <p className="text-xs text-gray-500 mt-1">
@@ -261,6 +289,18 @@ export default function AdminPanel() {
                     {user.is_approved ? ' ✓ Approved' : ' ⏳ Pending'}
                   </p>
                 </div>
+                {user.role !== 'admin' && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      deleteUser(user.id)
+                    }}
+                    className="ml-2 px-3 py-1 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all"
+                    title="Delete user"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
 
               {/* Show devices when user is selected */}
@@ -356,19 +396,62 @@ export default function AdminPanel() {
               <p className="text-gray-400">No devices created yet</p>
             ) : (
               devices.map((device) => (
-                <div key={device.id} className="card-border p-4 bg-dark-800 flex items-center justify-between">
-                  <div>
-                    <p className="text-white font-semibold">{device.name}</p>
-                    <p className="text-sm text-gray-400">{device.device_type}</p>
-                    <p className="text-xs text-gray-500 mt-1">Source: {device.source}</p>
-                    {device.location && <p className="text-xs text-gray-500">Location: {device.location}</p>}
-                  </div>
-                  <button
-                    onClick={() => deleteDevice(device.id)}
-                    className="px-4 py-2 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                <div key={device.id} className="card-border p-4 bg-dark-800">
+                  {editingDevice?.id === device.id ? (
+                    // Edit mode
+                    <div className="space-y-3">
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="Device name"
+                        className="w-full bg-dark-700 border border-gray-600 rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-neon-cyan"
+                      />
+                      <div className="flex gap-2 justify-end">
+                        <button
+                          onClick={() => updateDevice(device.id, editName, device.device_type, device.location)}
+                          className="px-3 py-1 bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-all flex items-center gap-1"
+                        >
+                          <Check className="w-4 h-4" /> Save
+                        </button>
+                        <button
+                          onClick={() => setEditingDevice(null)}
+                          className="px-3 py-1 bg-gray-500/20 text-gray-400 rounded hover:bg-gray-500/30 transition-all flex items-center gap-1"
+                        >
+                          <X className="w-4 h-4" /> Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    // View mode
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-white font-semibold">{device.name}</p>
+                        <p className="text-sm text-gray-400">{device.device_type}</p>
+                        <p className="text-xs text-gray-500 mt-1">Source: {device.source}</p>
+                        {device.location && <p className="text-xs text-gray-500">Location: {device.location}</p>}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            setEditingDevice(device)
+                            setEditName(device.name)
+                          }}
+                          className="px-3 py-2 bg-blue-500/20 text-blue-400 rounded hover:bg-blue-500/30 transition-all"
+                          title="Edit device"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => deleteDevice(device.id)}
+                          className="px-3 py-2 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all"
+                          title="Delete device"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))
             )}

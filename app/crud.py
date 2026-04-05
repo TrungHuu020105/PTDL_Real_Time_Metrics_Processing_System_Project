@@ -278,6 +278,20 @@ def reject_user(db: Session, user_id: int) -> bool:
     return False
 
 
+def delete_user(db: Session, user_id: int) -> bool:
+    """Admin deletes any user (approved or pending)"""
+    user = db.query(User).filter(User.id == user_id).first()
+    
+    if user:
+        # Delete user permissions first
+        db.query(UserDevicePermission).filter(UserDevicePermission.user_id == user_id).delete()
+        # Delete user
+        db.delete(user)
+        db.commit()
+        return True
+    return False
+
+
 # ============== DEVICE MANAGEMENT ==============
 
 def create_device(db: Session, device: DeviceCreate, admin_id: int) -> Device:
@@ -319,6 +333,22 @@ def delete_device(db: Session, device_id: int) -> bool:
         db.commit()
         return True
     return False
+
+
+def update_device(db: Session, device_id: int, name: str, device_type: str = None, location: str = None) -> Optional[Device]:
+    """Update device information (name, device_type, location)"""
+    device = db.query(Device).filter(Device.id == device_id).first()
+    
+    if device:
+        device.name = name
+        if device_type:
+            device.device_type = device_type
+        if location:
+            device.location = location
+        db.commit()
+        db.refresh(device)
+    
+    return device
 
 
 # ============== USER-DEVICE PERMISSIONS ==============

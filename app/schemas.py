@@ -215,6 +215,13 @@ class DeviceCreate(BaseModel):
     location: Optional[str] = Field(None, max_length=255)
 
 
+class DeviceUpdate(BaseModel):
+    """Schema for updating a device"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    device_type: Optional[str] = Field(None, description="Type of device: cpu, memory, temperature, humidity, etc")
+    location: Optional[str] = Field(None, max_length=255)
+
+
 class DeviceResponse(BaseModel):
     """Schema for device response"""
     id: int

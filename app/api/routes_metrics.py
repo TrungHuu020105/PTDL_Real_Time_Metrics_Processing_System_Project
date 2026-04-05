@@ -62,8 +62,7 @@ async def create_metrics_bulk(
     {
         "metrics": [
             {"metric_type": "cpu", "value": 45.5, "source": "server_1"},
-            {"metric_type": "memory", "value": 78.2, "source": "server_1"},
-            {"metric_type": "request_count", "value": 1250, "source": "server_1"}
+            {"metric_type": "memory", "value": 78.2, "source": "server_1"}
         ]
     }
     """
@@ -74,7 +73,7 @@ async def create_metrics_bulk(
 @router.get("/metrics/latest", response_model=LatestMetricsResponse)
 async def get_latest_metrics(db: Session = Depends(get_db)):
     """
-    Get the latest value for each metric type (cpu, memory, request_count).
+    Get the latest value for each metric type (cpu, memory).
     
     Returns the most recent recorded value for each metric type,
     or null if no data exists for that metric.
@@ -85,7 +84,7 @@ async def get_latest_metrics(db: Session = Depends(get_db)):
 
 @router.get("/metrics/history", response_model=MetricsHistoryResponse)
 async def get_metrics_history(
-    metric_type: str = Query(..., description="Type of metric: cpu, memory, request_count, temperature, humidity, soil_moisture, light_intensity, pressure"),
+    metric_type: str = Query(..., description="Type of metric: cpu, memory, temperature, humidity, soil_moisture, light_intensity, pressure"),
     minutes: int = Query(5, ge=1, le=1440, description="Time range in minutes (1-1440)"),
     db: Session = Depends(get_db)
 ):
@@ -94,14 +93,14 @@ async def get_metrics_history(
     
     Query parameters:
     - metric_type: Required. One of: 
-      - Server metrics: cpu, memory, request_count
+      - Server metrics: cpu, memory
       - IoT sensors: temperature, humidity, soil_moisture, light_intensity, pressure
     - minutes: Optional. Time range in minutes (default: 5, max: 1440)
     
     Returns data sorted by timestamp (ascending), suitable for chart display.
     """
     # Validate metric_type
-    server_types = {"cpu", "memory", "request_count"}
+    server_types = {"cpu", "memory"}
     iot_types = {"temperature", "humidity", "soil_moisture", "light_intensity", "pressure"}
     allowed_types = server_types | iot_types
     
@@ -131,10 +130,8 @@ async def get_metrics_summary(
     Returns:
     - avg_cpu_1m: Average CPU usage over time range
     - avg_memory_1m: Average memory usage over time range
-    - total_request_count_1m: Total request count over time range
     - latest_cpu: Latest CPU value (not averaged)
     - latest_memory: Latest memory value (not averaged)
-    - latest_request_count: Latest request count value (not averaged)
     
     Perfect for dashboard cards displaying KPIs.
     """
@@ -169,16 +166,14 @@ async def generate_sample_data(
         timestamp = None  # Will use current time in CRUD
         
         # Cycle through metric types and sources
-        metric_type = random.choice(["cpu", "memory", "request_count"])
+        metric_type = random.choice(["cpu", "memory"])
         source = random.choice(["server_1", "server_2", "server_3"])
 
         # Generate realistic values
         if metric_type == "cpu":
             value = random.uniform(20, 95)
-        elif metric_type == "memory":
+        else:  # memory
             value = random.uniform(15, 92)
-        else:  # request_count
-            value = float(random.randint(50, 5000))
 
         metric = MetricCreate(
             metric_type=metric_type,

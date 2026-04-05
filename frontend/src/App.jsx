@@ -4,7 +4,6 @@ import Dashboard from './components/Dashboard'
 import CPUMetrics from './components/CPUMetrics'
 import IoTMetrics from './components/IoTMetrics'
 import MemoryMetrics from './components/MemoryMetrics'
-import RequestMetrics from './components/RequestMetrics'
 import Alerts from './components/Alerts'
 
 export default function App() {
@@ -36,8 +35,6 @@ export default function App() {
         return <CPUMetrics />
       case 'memory':
         return <MemoryMetrics />
-      case 'requests':
-        return <RequestMetrics />
       case 'iot':
         return <IoTMetrics />
       case 'alerts':

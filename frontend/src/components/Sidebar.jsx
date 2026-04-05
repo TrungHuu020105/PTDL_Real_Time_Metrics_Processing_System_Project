@@ -5,7 +5,6 @@ export default function Sidebar({ activeMenu, setActiveMenu, health }) {
     { id: 'dashboard', label: 'Dashboard', icon: Gauge },
     { id: 'cpu', label: 'CPU Metrics', icon: Cpu },
     { id: 'memory', label: 'Memory', icon: Zap },
-    { id: 'requests', label: 'Requests', icon: Activity },
     { id: 'iot', label: 'IoT Sensors', icon: Wifi },
     { id: 'alerts', label: 'Alerts', icon: AlertCircle, badge: 'Soon' },
   ]

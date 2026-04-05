@@ -2,8 +2,9 @@
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.database import init_db
-from app.api import routes_metrics
+from app.database import init_db, SessionLocal
+from app.api import routes_metrics, routes_alerts
+from app.crud import delete_old_alerts
 
 # Initialize database on startup
 init_db()
@@ -26,6 +27,7 @@ app.add_middleware(
 
 # Include routes
 app.include_router(routes_metrics.router)
+app.include_router(routes_alerts.router)
 
 
 @app.get("/")
@@ -36,6 +38,19 @@ async def root():
         "docs": "/docs",
         "health": "/api/health"
     }
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Clean up old alerts when server starts"""
+    db = SessionLocal()
+    try:
+        deleted = delete_old_alerts(db, days=15)
+        print(f"✓ [Startup] Cleaned up {deleted} alerts older than 15 days")
+    except Exception as e:
+        print(f"✗ [Startup Error] Failed to cleanup alerts: {str(e)}")
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":

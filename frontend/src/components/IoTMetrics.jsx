@@ -1,12 +1,18 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { AlertCircle } from 'lucide-react'
 import api from '../api'
+import { checkMetricAlert } from '../utils/alertUtils'
+import { saveAlert } from '../utils/alertService'
 
 export default function IoTMetrics() {
   const [metricType, setMetricType] = useState('temperature')
   const [data, setData] = useState([])
+  const [current, setCurrent] = useState(0)
   const [stats, setStats] = useState({ avg: 0, max: 0, min: 0 })
+  const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(true)
+  const lastAlertRef = useRef(null)
 
   const iotMetrics = {
     temperature: { label: '🌡️ Temperature', unit: '°C', color: '#ff6b6b', min: 15, max: 35 },
@@ -18,8 +24,41 @@ export default function IoTMetrics() {
 
   const fetchData = async () => {
     try {
-      const response = await api.get(`/api/metrics/history?metric_type=${metricType}&minutes=120`)
-      const metrics = response.data.data || []
+      const [historyRes] = await Promise.all([
+        api.get(`/api/metrics/history?metric_type=${metricType}&minutes=120`)
+      ])
+      const metrics = historyRes.data.data || []
+      
+      // Set current to latest value
+      if (metrics.length > 0) {
+        const latestValue = metrics[metrics.length - 1].value
+        setCurrent(latestValue)
+        // Check for alerts
+        const newAlert = checkMetricAlert(metricType, latestValue)
+        setAlert(newAlert)
+
+        // Save alert if status is not normal and hasn't been saved recently
+        if (newAlert.status !== 'normal') {
+          const now = Date.now()
+          const lastAlertTime = lastAlertRef.current?.timestamp
+          const timeSinceLastAlert = lastAlertTime ? now - lastAlertTime : Infinity
+
+          // Save alert if status changed or 5 minutes have passed
+          if (!lastAlertRef.current || lastAlertRef.current.status !== newAlert.status || timeSinceLastAlert > 5 * 60 * 1000) {
+            const thresholdMap = {
+              temperature: { warning: 30, critical: 35 },
+              humidity: { warning: 75, critical: 90 },
+              soil_moisture: { warning: 30, critical: 20 },
+              light_intensity: { warning: 500, critical: 100 },
+              pressure: { warning: 1020, critical: 1050 }
+            }
+            const threshold = thresholdMap[metricType][newAlert.status]
+            
+            saveAlert(metricType, newAlert.status, latestValue, threshold, newAlert.fullMessage)
+            lastAlertRef.current = { status: newAlert.status, timestamp: now }
+          }
+        }
+      }
 
       const grouped = {}
       metrics.forEach(metric => {
@@ -92,11 +131,38 @@ export default function IoTMetrics() {
         ))}
       </div>
 
+      {/* Current Status */}
+      <div 
+        className="card-border p-6 bg-dark-700 border-2"
+        style={{ borderColor: alert?.color }}
+      >
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-gray-400 text-sm mb-2">CURRENT STATUS</p>
+            <div className="text-5xl font-bold neon-glow" style={{ color: alert?.color }}>
+              {current}{currentMetric.unit}
+            </div>
+            <p className="text-gray-500 text-sm mt-2">Live {currentMetric.label}</p>
+          </div>
+          {alert && alert.status !== 'normal' && (
+            <div className="text-right">
+              <span
+                className="px-3 py-1 rounded text-xs font-semibold text-dark-900"
+                style={{ backgroundColor: alert.color }}
+              >
+                {alert.message}
+              </span>
+              <p className="text-xs mt-2 text-gray-500 max-w-xs">{alert.fullMessage}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
         <div className="card-border p-4 bg-dark-800">
           <p className="text-gray-400 text-sm">Average</p>
-          <p className="text-2xl font-bold mt-2" style={{ color: currentMetric.color }}>
+          <p className="text-2xl font-bold mt-2" style={{ color: alert?.color }}>
             {stats.avg}{currentMetric.unit}
           </p>
         </div>

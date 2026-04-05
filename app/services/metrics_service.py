@@ -32,32 +32,27 @@ class MetricsService:
         Returns dict with:
         - avg_cpu_1m: Average CPU usage
         - avg_memory_1m: Average memory usage
-        - total_request_count_1m: Total requests
         - latest_cpu: Latest CPU value
         - latest_memory: Latest memory value
-        - latest_request_count: Latest request count value
         - timestamp: Timestamp of calculation
         """
         # Get all metrics in range
-        cpu_metrics, memory_metrics, request_metrics = crud.get_all_metrics_in_range(
+        cpu_metrics, memory_metrics = crud.get_all_metrics_in_range(
             db, minutes
         )
 
         # Get latest values
-        latest_cpu, latest_memory, latest_request_count = crud.get_latest_metrics(db)
+        latest_cpu, latest_memory = crud.get_latest_metrics(db)
 
         # Calculate aggregations
         avg_cpu = MetricsService.calculate_average(cpu_metrics)
         avg_memory = MetricsService.calculate_average(memory_metrics)
-        total_requests = MetricsService.calculate_total(request_metrics)
 
         return {
             "avg_cpu_1m": avg_cpu,
             "avg_memory_1m": avg_memory,
-            "total_request_count_1m": total_requests if total_requests > 0 else None,
             "latest_cpu": latest_cpu.value if latest_cpu else None,
             "latest_memory": latest_memory.value if latest_memory else None,
-            "latest_request_count": latest_request_count.value if latest_request_count else None,
             "timestamp": datetime.now(timezone(timedelta(hours=7)))
         }
 
@@ -68,11 +63,10 @@ class MetricsService:
         
         Returns dict with latest values and timestamp.
         """
-        latest_cpu, latest_memory, latest_request_count = crud.get_latest_metrics(db)
+        latest_cpu, latest_memory = crud.get_latest_metrics(db)
 
         return {
             "latest_cpu": latest_cpu.value if latest_cpu else None,
             "latest_memory": latest_memory.value if latest_memory else None,
-            "latest_request_count": latest_request_count.value if latest_request_count else None,
             "timestamp": datetime.now(timezone(timedelta(hours=7)))
         }

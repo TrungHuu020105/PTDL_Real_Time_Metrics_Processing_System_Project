@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, validator
 
 class MetricCreate(BaseModel):
     """Schema for creating a single metric"""
-    metric_type: str = Field(..., description="Type of metric: cpu, memory, or request_count")
+    metric_type: str = Field(..., description="Type of metric: cpu or memory")
     value: float = Field(..., description="Numeric value of the metric")
     source: str = Field(..., description="Source identifier (e.g., server name)")
     timestamp: Optional[datetime] = Field(default=None, description="Timestamp of metric (auto-generated if not provided)")
@@ -16,7 +16,7 @@ class MetricCreate(BaseModel):
     def validate_metric_type(cls, v):
         """Validate metric_type is one of allowed values"""
         # Server metrics
-        server_metrics = {"cpu", "memory", "request_count"}
+        server_metrics = {"cpu", "memory"}
         # IoT sensor metrics
         iot_metrics = {"temperature", "humidity", "soil_moisture", "light_intensity", "pressure"}
         allowed = server_metrics | iot_metrics
@@ -79,10 +79,8 @@ class SummaryMetricsResponse(BaseModel):
     """Schema for summary metrics response"""
     avg_cpu_1m: Optional[float] = None
     avg_memory_1m: Optional[float] = None
-    total_request_count_1m: Optional[float] = None
     latest_cpu: Optional[float] = None
     latest_memory: Optional[float] = None
-    latest_request_count: Optional[float] = None
     timestamp: datetime
 
 
@@ -97,3 +95,54 @@ class HealthResponse(BaseModel):
     """Schema for health check response"""
     status: str
     message: str
+
+
+# ============== ALERT SCHEMAS ==============
+
+class AlertCreate(BaseModel):
+    """Schema for creating an alert"""
+    metric_type: str = Field(..., description="Type of metric that triggered alert")
+    status: str = Field(..., description="Alert status: 'warning' or 'critical'")
+    current_value: float = Field(..., description="Current metric value")
+    threshold: float = Field(..., description="Threshold that was exceeded")
+    message: str = Field(..., description="Alert message")
+    source: str = Field(default="system", description="Source of the metric")
+
+    @validator('metric_type')
+    def validate_metric_type(cls, v):
+        """Validate metric_type"""
+        server_metrics = {"cpu", "memory"}
+        iot_metrics = {"temperature", "humidity", "soil_moisture", "light_intensity", "pressure"}
+        allowed = server_metrics | iot_metrics
+        if v not in allowed:
+            raise ValueError(f"metric_type must be one of {allowed}")
+        return v
+
+    @validator('status')
+    def validate_status(cls, v):
+        """Validate status"""
+        if v not in {"warning", "critical"}:
+            raise ValueError("status must be either 'warning' or 'critical'")
+        return v
+
+
+class AlertResponse(BaseModel):
+    """Schema for alert response"""
+    id: int
+    metric_type: str
+    status: str
+    current_value: float
+    threshold: float
+    message: str
+    source: str
+    created_at: datetime
+    resolved_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AlertListResponse(BaseModel):
+    """Schema for alerts list response"""
+    alerts: List[AlertResponse] = Field(..., description="List of alerts")
+    count: int = Field(..., description="Total number of alerts")

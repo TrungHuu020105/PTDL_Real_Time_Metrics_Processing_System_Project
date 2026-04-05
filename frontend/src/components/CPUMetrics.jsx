@@ -1,16 +1,48 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
+import { AlertCircle } from 'lucide-react'
 import api from '../api'
+import { checkMetricAlert } from '../utils/alertUtils'
+import { saveAlert } from '../utils/alertService'
 
 export default function CPUMetrics() {
   const [data, setData] = useState([])
+  const [current, setCurrent] = useState(0)
   const [stats, setStats] = useState({ avg: 0, max: 0, min: 0 })
+  const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(true)
+  const lastAlertRef = useRef(null)
 
   const fetchData = async () => {
     try {
-      const response = await api.get('/api/metrics/history?metric_type=cpu&minutes=60')
-      const metrics = response.data.data || []
+      const [historyRes, latestRes] = await Promise.all([
+        api.get('/api/metrics/history?metric_type=cpu&minutes=60'),
+        api.get('/api/metrics/latest')
+      ])
+      
+      const metrics = historyRes.data.data || []
+      const cpuValue = latestRes.data?.latest_cpu || 0
+      setCurrent(cpuValue)
+      
+      // Check for alerts
+      const newAlert = checkMetricAlert('cpu', cpuValue)
+      setAlert(newAlert)
+
+      // Save alert if status is not normal and hasn't been saved recently
+      if (newAlert.status !== 'normal') {
+        const now = Date.now()
+        const lastAlertTime = lastAlertRef.current?.timestamp
+        const timeSinceLastAlert = lastAlertTime ? now - lastAlertTime : Infinity
+
+        // Save alert if status changed or 5 minutes have passed
+        if (!lastAlertRef.current || lastAlertRef.current.status !== newAlert.status || timeSinceLastAlert > 5 * 60 * 1000) {
+          const thresholdMap = { warning: 80, critical: 90 }
+          const threshold = thresholdMap[newAlert.status]
+          
+          saveAlert('cpu', newAlert.status, cpuValue, threshold, newAlert.fullMessage)
+          lastAlertRef.current = { status: newAlert.status, timestamp: now }
+        }
+      }
 
       // Group by timestamp and calculate average
       const grouped = {}
@@ -58,6 +90,33 @@ export default function CPUMetrics() {
       <div>
         <h1 className="text-3xl font-bold text-white">CPU Metrics</h1>
         <p className="text-gray-400 mt-2">CPU usage over the last 60 minutes</p>
+      </div>
+
+      {/* Current Status */}
+      <div 
+        className="card-border p-6 bg-dark-700 border-2"
+        style={{ borderColor: alert?.color }}
+      >
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-gray-400 text-sm mb-2">CURRENT STATUS</p>
+            <div className="text-5xl font-bold neon-glow" style={{ color: alert?.color }}>
+              {current}%
+            </div>
+            <p className="text-gray-500 text-sm mt-2">Live CPU Usage</p>
+          </div>
+          {alert && alert.status !== 'normal' && (
+            <div className="text-right">
+              <span
+                className="px-3 py-1 rounded text-xs font-semibold text-dark-900"
+                style={{ backgroundColor: alert.color }}
+              >
+                {alert.message}
+              </span>
+              <p className="text-xs mt-2 text-gray-500">{alert.fullMessage}</p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Stats */}

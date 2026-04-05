@@ -18,7 +18,6 @@ export default function IoTMetrics() {
 
   const fetchData = async () => {
     try {
-      setLoading(true)
       const response = await api.get(`/api/metrics/history?metric_type=${metricType}&minutes=120`)
       const metrics = response.data.data || []
 
@@ -49,10 +48,10 @@ export default function IoTMetrics() {
       }
 
       setData(chartData)
+      setLoading(false)
     } catch (error) {
       console.error('Failed to fetch IoT metrics:', error)
       setData([])
-    } finally {
       setLoading(false)
     }
   }
@@ -62,7 +61,7 @@ export default function IoTMetrics() {
   }, [metricType])
 
   useEffect(() => {
-    const interval = setInterval(fetchData, 10000)
+    const interval = setInterval(fetchData, 3000)
     return () => clearInterval(interval)
   }, [metricType])
 

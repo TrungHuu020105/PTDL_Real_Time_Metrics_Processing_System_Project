@@ -11,7 +11,7 @@ Usage:
 import random
 import sys
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Add app directory to path
 sys.path.insert(0, '.')
@@ -204,7 +204,8 @@ def generate_iot_data_spread_time(count: int = 200, hours: int = 24) -> dict:
     print(f"📊 Generating {count} IoT metrics spread over {hours} hours...")
     print()
     
-    now = datetime.utcnow()
+    vietnam_tz = timezone(timedelta(hours=7))
+    now = datetime.now(vietnam_tz)
     
     # Generate sample data
     for i in range(count):

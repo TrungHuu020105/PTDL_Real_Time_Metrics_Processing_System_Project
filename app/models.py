@@ -1,6 +1,6 @@
 """SQLAlchemy ORM models"""
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from sqlalchemy import Column, Integer, Float, String, DateTime, Index
 from app.database import Base
 
@@ -13,7 +13,7 @@ class Metric(Base):
     metric_type = Column(String(50), index=True, nullable=False)  # cpu, memory, request_count
     value = Column(Float, nullable=False)
     source = Column(String(100), nullable=False)  # e.g., "server_1", "server_2"
-    timestamp = Column(DateTime, default=datetime.utcnow, index=True, nullable=False)
+    timestamp = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), index=True, nullable=False)
 
     # Composite index for efficient time-range queries
     __table_args__ = (

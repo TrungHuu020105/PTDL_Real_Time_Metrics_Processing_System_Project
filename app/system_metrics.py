@@ -4,7 +4,7 @@ Uses psutil to monitor actual system performance.
 """
 
 import psutil
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
 from app.schemas import MetricCreate
 from app.crud import create_metric
@@ -81,7 +81,7 @@ class SystemMetricsCollector:
                 "free": disk_info.free,
                 "total": disk_info.total,
             },
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone(timedelta(hours=7))).isoformat()
         }
 
     @staticmethod
@@ -156,7 +156,8 @@ class SystemMetricsCollector:
         """
         cpu_value = SystemMetricsCollector.get_cpu_percent(interval=0.1)
         memory_value = SystemMetricsCollector.get_memory_percent()
-        timestamp = datetime.utcnow()
+        vietnam_tz = timezone(timedelta(hours=7))
+        timestamp = datetime.now(vietnam_tz)
         
         # Create CPU metric
         cpu_metric = MetricCreate(

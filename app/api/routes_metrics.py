@@ -1,7 +1,7 @@
 """API routes for metrics endpoints"""
 
 from typing import List
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -285,9 +285,10 @@ async def get_current_system_metrics():
     This endpoint measures actual system performance in real-time.
     """
     metrics = SystemMetricsCollector.get_system_metrics()
+    vietnam_tz = timezone(timedelta(hours=7))
     
     return {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(vietnam_tz).isoformat(),
         "metrics": {
             "cpu": {
                 "value": round(metrics["cpu"], 2),

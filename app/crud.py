@@ -1,6 +1,6 @@
 """CRUD operations for database"""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy.orm import Session
 from app.models import Metric
@@ -9,8 +9,9 @@ from app.schemas import MetricCreate
 
 def create_metric(db: Session, metric: MetricCreate) -> Metric:
     """Create a single metric record"""
-    # Use provided timestamp or current time
-    timestamp = metric.timestamp if metric.timestamp else datetime.utcnow()
+    # Use provided timestamp or current time (Vietnam timezone UTC+7)
+    vietnam_tz = timezone(timedelta(hours=7))
+    timestamp = metric.timestamp if metric.timestamp else datetime.now(vietnam_tz)
     
     db_metric = Metric(
         metric_type=metric.metric_type,
@@ -28,7 +29,8 @@ def create_metrics_bulk(db: Session, metrics: List[MetricCreate]) -> List[Metric
     """Create multiple metric records"""
     db_metrics = []
     for metric in metrics:
-        timestamp = metric.timestamp if metric.timestamp else datetime.utcnow()
+        vietnam_tz = timezone(timedelta(hours=7))
+        timestamp = metric.timestamp if metric.timestamp else datetime.now(vietnam_tz)
         db_metric = Metric(
             metric_type=metric.metric_type,
             value=metric.value,
@@ -70,7 +72,8 @@ def get_metrics_history(
     minutes: int = 5
 ) -> List[Metric]:
     """Get historical metrics for a specific type within a time range"""
-    time_threshold = datetime.utcnow() - timedelta(minutes=minutes)
+    vietnam_tz = timezone(timedelta(hours=7))
+    time_threshold = datetime.now(vietnam_tz) - timedelta(minutes=minutes)
     
     metrics = db.query(Metric).filter(
         Metric.metric_type == metric_type,
@@ -86,7 +89,8 @@ def get_metrics_in_range(
     minutes: int
 ) -> List[Metric]:
     """Get metrics within a time range"""
-    time_threshold = datetime.utcnow() - timedelta(minutes=minutes)
+    vietnam_tz = timezone(timedelta(hours=7))
+    time_threshold = datetime.now(vietnam_tz) - timedelta(minutes=minutes)
     
     metrics = db.query(Metric).filter(
         Metric.metric_type == metric_type,
@@ -98,7 +102,8 @@ def get_metrics_in_range(
 
 def get_all_metrics_in_range(db: Session, minutes: int) -> tuple:
     """Get all metric types within a time range"""
-    time_threshold = datetime.utcnow() - timedelta(minutes=minutes)
+    vietnam_tz = timezone(timedelta(hours=7))
+    time_threshold = datetime.now(vietnam_tz) - timedelta(minutes=minutes)
     
     cpu_metrics = db.query(Metric).filter(
         Metric.metric_type == "cpu",

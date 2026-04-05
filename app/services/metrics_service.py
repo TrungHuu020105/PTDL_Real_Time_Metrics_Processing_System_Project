@@ -1,6 +1,6 @@
 """Business logic for metrics processing and aggregation"""
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from app.models import Metric
@@ -58,7 +58,7 @@ class MetricsService:
             "latest_cpu": latest_cpu.value if latest_cpu else None,
             "latest_memory": latest_memory.value if latest_memory else None,
             "latest_request_count": latest_request_count.value if latest_request_count else None,
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(timezone(timedelta(hours=7)))
         }
 
     @staticmethod
@@ -74,5 +74,5 @@ class MetricsService:
             "latest_cpu": latest_cpu.value if latest_cpu else None,
             "latest_memory": latest_memory.value if latest_memory else None,
             "latest_request_count": latest_request_count.value if latest_request_count else None,
-            "timestamp": datetime.utcnow()
+            "timestamp": datetime.now(timezone(timedelta(hours=7)))
         }

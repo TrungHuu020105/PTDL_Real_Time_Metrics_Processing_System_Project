@@ -1,15 +1,24 @@
-import { BarChart3, Cpu, Zap, Activity, Gauge, AlertCircle, Wifi, LogOut } from 'lucide-react'
+import { BarChart3, Cpu, Zap, Activity, Gauge, AlertCircle, Wifi, LogOut, Settings } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 
 export default function Sidebar({ activeMenu, setActiveMenu, health }) {
   const { user, logout } = useAuth()
-  const menuItems = [
+  
+  const commonMenuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Gauge },
     { id: 'cpu', label: 'CPU Metrics', icon: Cpu },
     { id: 'memory', label: 'Memory', icon: Zap },
     { id: 'iot', label: 'IoT Sensors', icon: Wifi },
     { id: 'alerts', label: 'Alerts', icon: AlertCircle },
   ]
+  
+  const adminMenuItems = [
+    { id: 'admin-panel', label: 'Admin Panel', icon: Settings },
+  ]
+  
+  const menuItems = user?.role === 'admin' 
+    ? [...commonMenuItems, ...adminMenuItems]
+    : commonMenuItems
 
   return (
     <div className="w-64 bg-dark-800 border-r border-neon-cyan/20 p-6 flex flex-col">

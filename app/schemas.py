@@ -199,7 +199,42 @@ class UserResponse(BaseModel):
     email: str
     role: str
     is_active: bool
+    is_approved: bool
+    approved_at: Optional[datetime] = None
     created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class DeviceCreate(BaseModel):
+    """Schema for creating a device"""
+    name: str = Field(..., min_length=1, max_length=100)
+    device_type: str = Field(..., description="Type of device: cpu, memory, temperature, humidity, etc")
+    source: str = Field(..., min_length=1, max_length=100, description="Unique identifier")
+    location: Optional[str] = Field(None, max_length=255)
+
+
+class DeviceResponse(BaseModel):
+    """Schema for device response"""
+    id: int
+    name: str
+    device_type: str
+    source: str
+    location: Optional[str] = None
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UserDevicePermissionResponse(BaseModel):
+    """Schema for user-device permission"""
+    id: int
+    user_id: int
+    device_id: int
+    granted_at: datetime
 
     class Config:
         from_attributes = True

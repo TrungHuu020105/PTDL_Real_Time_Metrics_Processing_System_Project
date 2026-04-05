@@ -6,6 +6,7 @@ import CPUMetrics from './components/CPUMetrics'
 import IoTMetrics from './components/IoTMetrics'
 import MemoryMetrics from './components/MemoryMetrics'
 import Alerts from './components/Alerts'
+import AdminPanel from './components/AdminPanel'
 import Login from './components/Login'
 
 function AppContent() {
@@ -42,6 +43,8 @@ function AppContent() {
         return <IoTMetrics />
       case 'alerts':
         return <Alerts />
+      case 'admin-panel':
+        return <AdminPanel />
       default:
         return <Dashboard />
     }

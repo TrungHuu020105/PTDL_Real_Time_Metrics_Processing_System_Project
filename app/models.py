@@ -58,7 +58,41 @@ class User(Base):
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(20), nullable=False, default="user")  # 'admin' or 'user'
     is_active = Column(Boolean, default=True, nullable=False)
+    is_approved = Column(Boolean, default=False, nullable=False)  # Admin must approve
+    approved_by = Column(Integer, nullable=True)  # Admin ID who approved
+    approved_at = Column(DateTime, nullable=True)  # When approved
     created_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
 
     def __repr__(self):
-        return f"<User(username={self.username}, role={self.role}, email={self.email})>"
+        return f"<User(username={self.username}, role={self.role}, approved={self.is_approved})>"
+
+
+class Device(Base):
+    """Device model for managing sources (servers, IoT devices)"""
+    __tablename__ = "devices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), nullable=False)  # Device name (e.g., "Server 1", "Temperature Sensor 1")
+    device_type = Column(String(50), nullable=False)  # 'cpu', 'memory', 'temperature', 'humidity', etc
+    source = Column(String(100), unique=True, nullable=False, index=True)  # Unique identifier for metrics
+    location = Column(String(255), nullable=True)  # Physical location
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_by = Column(Integer, nullable=False)  # Admin ID who created
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
+
+    def __repr__(self):
+        return f"<Device(name={self.name}, type={self.device_type}, source={self.source})>"
+
+
+class UserDevicePermission(Base):
+    """Permissions linking users to devices they can view"""
+    __tablename__ = "user_device_permissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)  # User ID
+    device_id = Column(Integer, nullable=False, index=True)  # Device ID
+    granted_by = Column(Integer, nullable=False)  # Admin ID who granted
+    granted_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
+
+    def __repr__(self):
+        return f"<UserDevicePermission(user_id={self.user_id}, device_id={self.device_id})>"

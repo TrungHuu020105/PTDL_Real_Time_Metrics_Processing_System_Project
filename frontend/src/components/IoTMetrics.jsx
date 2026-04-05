@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Lock } from 'lucide-react'
 import api from '../api'
 import { checkMetricAlert } from '../utils/alertUtils'
 import { saveAlert } from '../utils/alertService'
@@ -12,6 +12,7 @@ export default function IoTMetrics() {
   const [stats, setStats] = useState({ avg: 0, max: 0, min: 0 })
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [accessDenied, setAccessDenied] = useState(false)
   const lastAlertRef = useRef(null)
 
   const iotMetrics = {
@@ -24,6 +25,7 @@ export default function IoTMetrics() {
 
   const fetchData = async () => {
     try {
+      setAccessDenied(false)
       const [historyRes] = await Promise.all([
         api.get(`/api/metrics/history?metric_type=${metricType}&minutes=120`)
       ])
@@ -89,6 +91,9 @@ export default function IoTMetrics() {
       setData(chartData)
       setLoading(false)
     } catch (error) {
+      if (error.response?.status === 403) {
+        setAccessDenied(true)
+      }
       console.error('Failed to fetch IoT metrics:', error)
       setData([])
       setLoading(false)
@@ -112,6 +117,17 @@ export default function IoTMetrics() {
         <h1 className="text-3xl font-bold text-white">📡 IoT Sensor Metrics</h1>
         <p className="text-gray-400 mt-2">Real-time IoT sensor data monitoring</p>
       </div>
+
+      {/* Access Denied Message */}
+      {accessDenied && (
+        <div className="card-border p-6 bg-red-500/10 border-red-500/30 flex items-center gap-4">
+          <Lock className="w-6 h-6 text-red-400" />
+          <div>
+            <p className="text-red-400 font-semibold">No Access</p>
+            <p className="text-red-300 text-sm mt-1">You don't have access to any IoT metrics. Please contact your administrator to request device access.</p>
+          </div>
+        </div>
+      )}
 
       {/* Metric Type Selector */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

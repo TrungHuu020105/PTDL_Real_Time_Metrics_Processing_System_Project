@@ -3,10 +3,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, SessionLocal
-from app.api import routes_metrics, routes_alerts, routes_auth
+from app.api import routes_metrics, routes_alerts, routes_auth, routes_admin
 from app.crud import delete_old_alerts, get_user_by_username, create_user
 from app.schemas import UserRegister
 from app.api.routes_auth import hash_password
+from app.models import Device, UserDevicePermission
 
 # Initialize database on startup
 init_db()
@@ -31,6 +32,7 @@ app.add_middleware(
 app.include_router(routes_metrics.router)
 app.include_router(routes_alerts.router)
 app.include_router(routes_auth.router)
+app.include_router(routes_admin.router)
 
 
 @app.get("/")
@@ -56,14 +58,48 @@ async def startup_event():
         admin_user = get_user_by_username(db, "admin")
         if not admin_user:
             admin_data = UserRegister(username="admin", email="admin@example.com", password="123456", role="admin")
-            create_user(db, admin_data, hash_password("123456"))
+            admin_user = create_user(db, admin_data, hash_password("123456"))
             print("✓ [Startup] Created demo admin user (admin/123456)")
         
         user_user = get_user_by_username(db, "user")
         if not user_user:
             user_data = UserRegister(username="user", email="user@example.com", password="123456", role="user")
-            create_user(db, user_data, hash_password("123456"))
+            user_user = create_user(db, user_data, hash_password("123456"))
             print("✓ [Startup] Created demo user (user/123456)")
+        
+        # Create demo devices if they don't exist
+        demo_devices = [
+            {"name": "System Monitor", "device_type": "cpu", "source": "system_monitor", "location": "Local"},
+            {"name": "Sensor 1", "device_type": "temperature", "source": "sensor_1", "location": "Room 1"},
+            {"name": "Sensor 2", "device_type": "humidity", "source": "sensor_2", "location": "Room 2"},
+            {"name": "Sensor 3", "device_type": "soil_moisture", "source": "sensor_3", "location": "Garden"},
+            {"name": "Sensor 4", "device_type": "light_intensity", "source": "sensor_4", "location": "Office"},
+        ]
+        
+        for demo_device in demo_devices:
+            existing = db.query(Device).filter(Device.source == demo_device["source"]).first()
+            if not existing:
+                device = Device(
+                    name=demo_device["name"],
+                    device_type=demo_device["device_type"],
+                    source=demo_device["source"],
+                    location=demo_device["location"],
+                    is_active=True,
+                    created_by=admin_user.id
+                )
+                db.add(device)
+                db.commit()
+                db.refresh(device)
+                
+                # Grant admin access to all demo devices
+                permission = UserDevicePermission(
+                    user_id=admin_user.id,
+                    device_id=device.id,
+                    granted_by=admin_user.id
+                )
+                db.add(permission)
+                db.commit()
+                print(f"✓ [Startup] Created demo device: {demo_device['name']}")
             
     except Exception as e:
         print(f"✗ [Startup Error] {str(e)}")

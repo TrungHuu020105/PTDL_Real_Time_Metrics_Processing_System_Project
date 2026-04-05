@@ -1,13 +1,14 @@
 """Authentication routes"""
 
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List
+from fastapi import APIRouter, Depends, HTTPException, status, Header
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from app.database import get_db
 from app.models import User
-from app.schemas import UserRegister, UserLogin, TokenResponse, UserResponse
+from app.schemas import UserRegister, UserLogin, TokenResponse, UserResponse, DeviceResponse
 from app import crud
 from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
 
@@ -36,13 +37,24 @@ def create_access_token(data: dict):
     return encoded_jwt
 
 
-def get_current_user(token: str = None, db: Session = Depends(get_db)) -> User:
-    """Get current user from JWT token"""
-    if not token:
+def get_current_user(authorization: str = Header(None), db: Session = Depends(get_db)) -> User:
+    """Get current user from JWT token in Authorization header"""
+    if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Extract token from "Bearer <token>" format
+    try:
+        scheme, token = authorization.split()
+        if scheme.lower() != "bearer":
+            raise ValueError()
+    except (ValueError, IndexError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
         )
     
     try:
@@ -118,6 +130,13 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
             detail="User is inactive"
         )
     
+    # Check if user is approved by admin (skip for admin role)
+    if not user.is_approved and user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your account is pending admin approval"
+        )
+    
     # Create access token
     access_token = create_access_token(data={"sub": user.username})
     
@@ -134,7 +153,30 @@ async def login(credentials: UserLogin, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(token: str = None, db: Session = Depends(get_db)):
+async def get_me(current_user: User = Depends(get_current_user)):
     """Get current user info"""
-    user = get_current_user(token, db)
-    return user
+    return current_user
+
+
+@router.get("/me/devices")
+async def get_my_devices(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Get current user's accessible devices"""
+    devices = crud.get_user_devices(db, current_user.id)
+    return {
+        "devices": [
+            {
+                "id": d.id,
+                "name": d.name,
+                "device_type": d.device_type,
+                "source": d.source,
+                "location": d.location,
+                "is_active": d.is_active,
+                "created_at": d.created_at
+            }
+            for d in devices
+        ],
+        "count": len(devices)
+    }

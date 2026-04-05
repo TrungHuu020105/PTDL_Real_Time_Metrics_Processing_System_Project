@@ -23,6 +23,9 @@ export function AuthProvider({ children }) {
   // Fetch current user info
   const fetchCurrentUser = async (token) => {
     try {
+      // Set auth header before making request
+      api.defaults.headers.common['Authorization'] = `Bearer ${token}`
+      
       const response = await api.get('/api/auth/me', {
         headers: { Authorization: `Bearer ${token}` }
       })
@@ -32,6 +35,7 @@ export function AuthProvider({ children }) {
       // Token invalid, clear it
       localStorage.removeItem('access_token')
       setToken(null)
+      delete api.defaults.headers.common['Authorization']
     } finally {
       setLoading(false)
     }

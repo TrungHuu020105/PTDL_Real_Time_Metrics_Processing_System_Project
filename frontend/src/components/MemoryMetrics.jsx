@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import { AlertCircle } from 'lucide-react'
+import { AlertCircle, Lock } from 'lucide-react'
 import api from '../api'
 import { checkMetricAlert } from '../utils/alertUtils'
 import { saveAlert } from '../utils/alertService'
@@ -11,10 +11,12 @@ export default function MemoryMetrics() {
   const [stats, setStats] = useState({ avg: 0, max: 0, min: 0 })
   const [alert, setAlert] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [accessDenied, setAccessDenied] = useState(false)
   const lastAlertRef = useRef(null)
 
   const fetchData = async () => {
     try {
+      setAccessDenied(false)
       const [historyRes, latestRes] = await Promise.all([
         api.get('/api/metrics/history?metric_type=memory&minutes=60'),
         api.get('/api/metrics/latest')
@@ -63,13 +65,16 @@ export default function MemoryMetrics() {
 
       const allValues = metrics.map(m => m.value)
       setStats({
-        avg: (allValues.reduce((a, b) => a + b, 0) / allValues.length).toFixed(2),
-        max: Math.max(...allValues).toFixed(2),
-        min: Math.min(...allValues).toFixed(2)
+        avg: (allValues.reduce((a, b) => a + b, 0) / allValues.length || 0).toFixed(2),
+        max: (allValues.length > 0 ? Math.max(...allValues) : 0).toFixed(2),
+        min: (allValues.length > 0 ? Math.min(...allValues) : 0).toFixed(2)
       })
 
       setData(chartData)
     } catch (error) {
+      if (error.response?.status === 403) {
+        setAccessDenied(true)
+      }
       console.error('Failed to fetch memory metrics:', error)
     } finally {
       setLoading(false)
@@ -88,6 +93,17 @@ export default function MemoryMetrics() {
         <h1 className="text-3xl font-bold text-white">Memory Metrics</h1>
         <p className="text-gray-400 mt-2">Memory usage over the last 60 minutes</p>
       </div>
+
+      {/* Access Denied Message */}
+      {accessDenied && (
+        <div className="card-border p-6 bg-red-500/10 border-red-500/30 flex items-center gap-4">
+          <Lock className="w-6 h-6 text-red-400" />
+          <div>
+            <p className="text-red-400 font-semibold">No Access</p>
+            <p className="text-red-300 text-sm mt-1">You don't have access to any memory metrics. Please contact your administrator to request device access.</p>
+          </div>
+        </div>
+      )}
 
       {/* Current Status */}
       <div 

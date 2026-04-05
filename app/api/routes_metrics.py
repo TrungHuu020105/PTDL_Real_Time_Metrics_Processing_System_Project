@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
+from app.models import User
 from app.schemas import (
     MetricCreate,
     MetricBulkCreate,
@@ -17,6 +18,7 @@ from app.schemas import (
 from app import crud
 from app.services.metrics_service import MetricsService
 from app.system_metrics import SystemMetricsCollector
+from app.api.routes_auth import get_current_user
 
 router = APIRouter(prefix="/api", tags=["metrics"])
 
@@ -71,25 +73,38 @@ async def create_metrics_bulk(
 
 
 @router.get("/metrics/latest", response_model=LatestMetricsResponse)
-async def get_latest_metrics(db: Session = Depends(get_db)):
+async def get_latest_metrics(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     """
-    Get the latest value for each metric type (cpu, memory).
+    Get the latest value for each metric type (cpu, memory), filtered by user's accessible devices.
     
-    Returns the most recent recorded value for each metric type,
+    Returns the most recent recorded value for each metric type from devices the user has access to,
     or null if no data exists for that metric.
     """
-    latest_data = MetricsService.get_latest_values(db)
-    return latest_data
+    from datetime import datetime, timezone, timedelta
+    
+    cpu_metric, memory_metric = crud.get_latest_metrics_for_user(db, current_user.id)
+    vietnam_tz = timezone(timedelta(hours=7))
+    
+    return {
+        "latest_cpu": cpu_metric.value if cpu_metric else None,
+        "latest_memory": memory_metric.value if memory_metric else None,
+        "latest_request_count": None,
+        "timestamp": datetime.now(vietnam_tz)
+    }
 
 
 @router.get("/metrics/history", response_model=MetricsHistoryResponse)
 async def get_metrics_history(
     metric_type: str = Query(..., description="Type of metric: cpu, memory, temperature, humidity, soil_moisture, light_intensity, pressure"),
     minutes: int = Query(5, ge=1, le=1440, description="Time range in minutes (1-1440)"),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """
-    Get historical data for a specific metric type.
+    Get historical data for a specific metric type, filtered by user's accessible devices.
     
     Query parameters:
     - metric_type: Required. One of: 
@@ -98,6 +113,7 @@ async def get_metrics_history(
     - minutes: Optional. Time range in minutes (default: 5, max: 1440)
     
     Returns data sorted by timestamp (ascending), suitable for chart display.
+    Only returns metrics from devices the user has access to.
     """
     # Validate metric_type
     server_types = {"cpu", "memory"}
@@ -110,7 +126,7 @@ async def get_metrics_history(
             detail=f"Invalid metric_type. Must be one of {allowed_types}"
         )
 
-    metrics = crud.get_metrics_history(db, metric_type, minutes)
+    metrics = crud.get_metrics_history_for_user(db, current_user.id, metric_type, minutes)
 
     return {
         "metric_type": metric_type,

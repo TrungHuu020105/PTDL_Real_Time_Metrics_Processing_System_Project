@@ -4,7 +4,6 @@ import api from '../api'
 
 export default function Alerts() {
   const [alerts, setAlerts] = useState([])
-  const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
 
   // Format metric name for display
@@ -38,21 +37,18 @@ export default function Alerts() {
   // Fetch alerts from database
   const fetchAlerts = async () => {
     try {
-      setLoading(true)
       const response = await api.get('/api/alerts/recent?hours=24&limit=100')
       setAlerts(response.data?.alerts || [])
       setLastUpdated(new Date())
     } catch (error) {
       console.error('Error fetching alerts:', error)
-    } finally {
-      setLoading(false)
     }
   }
 
-  // Fetch alerts on mount and set up polling (5 seconds for live alerts)
+  // Fetch alerts on mount and set up polling (2 seconds for live alerts)
   useEffect(() => {
     fetchAlerts()
-    const interval = setInterval(fetchAlerts, 5000)
+    const interval = setInterval(fetchAlerts, 2000)
     return () => clearInterval(interval)
   }, [])
 
@@ -126,11 +122,7 @@ export default function Alerts() {
       </div>
 
       {/* Active Alerts */}
-      {loading ? (
-        <div className="card-border p-6 bg-dark-800 text-center">
-          <p className="text-gray-400">Loading alerts...</p>
-        </div>
-      ) : alerts.length === 0 ? (
+      {alerts.length === 0 ? (
         <div className="card-border p-6 bg-dark-800">
           <div className="flex items-center gap-4">
             <CheckCircle className="w-8 h-8 text-neon-green flex-shrink-0" />

@@ -3,8 +3,10 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, SessionLocal
-from app.api import routes_metrics, routes_alerts
-from app.crud import delete_old_alerts
+from app.api import routes_metrics, routes_alerts, routes_auth
+from app.crud import delete_old_alerts, get_user_by_username, create_user
+from app.schemas import UserRegister
+from app.api.routes_auth import hash_password
 
 # Initialize database on startup
 init_db()
@@ -28,6 +30,7 @@ app.add_middleware(
 # Include routes
 app.include_router(routes_metrics.router)
 app.include_router(routes_alerts.router)
+app.include_router(routes_auth.router)
 
 
 @app.get("/")
@@ -42,13 +45,28 @@ async def root():
 
 @app.on_event("startup")
 async def startup_event():
-    """Clean up old alerts when server starts"""
+    """Initialize on server startup"""
     db = SessionLocal()
     try:
+        # Clean up old alerts
         deleted = delete_old_alerts(db, days=15)
         print(f"✓ [Startup] Cleaned up {deleted} alerts older than 15 days")
+        
+        # Create demo users if they don't exist
+        admin_user = get_user_by_username(db, "admin")
+        if not admin_user:
+            admin_data = UserRegister(username="admin", email="admin@example.com", password="123456", role="admin")
+            create_user(db, admin_data, hash_password("123456"))
+            print("✓ [Startup] Created demo admin user (admin/123456)")
+        
+        user_user = get_user_by_username(db, "user")
+        if not user_user:
+            user_data = UserRegister(username="user", email="user@example.com", password="123456", role="user")
+            create_user(db, user_data, hash_password("123456"))
+            print("✓ [Startup] Created demo user (user/123456)")
+            
     except Exception as e:
-        print(f"✗ [Startup Error] Failed to cleanup alerts: {str(e)}")
+        print(f"✗ [Startup Error] {str(e)}")
     finally:
         db.close()
 

@@ -146,3 +146,60 @@ class AlertListResponse(BaseModel):
     """Schema for alerts list response"""
     alerts: List[AlertResponse] = Field(..., description="List of alerts")
     count: int = Field(..., description="Total number of alerts")
+
+
+# ============== AUTH SCHEMAS ==============
+
+class UserRegister(BaseModel):
+    """Schema for user registration"""
+    username: str = Field(..., min_length=3, max_length=50, description="Username")
+    email: str = Field(..., description="Email address")
+    password: str = Field(..., min_length=6, description="Password")
+    role: str = Field(default="user", description="Role: 'admin' or 'user'")
+
+    @validator('username')
+    def validate_username(cls, v):
+        """Validate username format"""
+        if not v.isalnum():
+            raise ValueError("username must be alphanumeric")
+        return v
+
+    @validator('email')
+    def validate_email(cls, v):
+        """Validate email format"""
+        if "@" not in v:
+            raise ValueError("invalid email format")
+        return v
+
+    @validator('role')
+    def validate_role(cls, v):
+        """Validate role"""
+        if v not in {"admin", "user"}:
+            raise ValueError("role must be 'admin' or 'user'")
+        return v
+
+
+class UserLogin(BaseModel):
+    """Schema for user login"""
+    username: str = Field(..., description="Username")
+    password: str = Field(..., description="Password")
+
+
+class TokenResponse(BaseModel):
+    """Schema for token response"""
+    access_token: str
+    token_type: str
+    user: dict
+
+
+class UserResponse(BaseModel):
+    """Schema for user response"""
+    id: int
+    username: str
+    email: str
+    role: str
+    is_active: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

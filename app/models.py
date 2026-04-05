@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models"""
 
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import Column, Integer, Float, String, DateTime, Index
+from sqlalchemy import Column, Integer, Float, String, DateTime, Index, Boolean
 from app.database import Base
 
 
@@ -46,3 +46,19 @@ class Alert(Base):
 
     def __repr__(self):
         return f"<Alert(type={self.metric_type}, status={self.status}, value={self.current_value}, at={self.created_at})>"
+
+
+class User(Base):
+    """User account model for authentication"""
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(50), unique=True, index=True, nullable=False)
+    email = Column(String(100), unique=True, index=True, nullable=False)
+    hashed_password = Column(String(255), nullable=False)
+    role = Column(String(20), nullable=False, default="user")  # 'admin' or 'user'
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
+
+    def __repr__(self):
+        return f"<User(username={self.username}, role={self.role}, email={self.email})>"

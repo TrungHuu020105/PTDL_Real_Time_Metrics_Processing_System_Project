@@ -1,14 +1,17 @@
 import { useState, useEffect } from 'react'
+import { AuthProvider, useAuth } from './context/AuthContext'
 import Sidebar from './components/Sidebar'
 import Dashboard from './components/Dashboard'
 import CPUMetrics from './components/CPUMetrics'
 import IoTMetrics from './components/IoTMetrics'
 import MemoryMetrics from './components/MemoryMetrics'
 import Alerts from './components/Alerts'
+import Login from './components/Login'
 
-export default function App() {
+function AppContent() {
   const [activeMenu, setActiveMenu] = useState('dashboard')
   const [health, setHealth] = useState(null)
+  const { user, token, loading } = useAuth()
 
   useEffect(() => {
     // Check backend health
@@ -44,6 +47,21 @@ export default function App() {
     }
   }
 
+  // Show loading
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-dark-900 flex items-center justify-center">
+        <p className="text-gray-400">Loading...</p>
+      </div>
+    )
+  }
+
+  // Show login if not authenticated
+  if (!token || !user) {
+    return <Login />
+  }
+
+  // Show dashboard if authenticated
   return (
     <div className="flex h-screen bg-dark-900">
       <Sidebar activeMenu={activeMenu} setActiveMenu={setActiveMenu} health={health} />
@@ -51,5 +69,13 @@ export default function App() {
         {renderContent()}
       </div>
     </div>
+  )
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
   )
 }

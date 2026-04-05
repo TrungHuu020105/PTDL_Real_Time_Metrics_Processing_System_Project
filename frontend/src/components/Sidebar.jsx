@@ -1,12 +1,14 @@
-import { BarChart3, Cpu, Zap, Activity, Gauge, AlertCircle, Wifi } from 'lucide-react'
+import { BarChart3, Cpu, Zap, Activity, Gauge, AlertCircle, Wifi, LogOut } from 'lucide-react'
+import { useAuth } from '../context/AuthContext'
 
 export default function Sidebar({ activeMenu, setActiveMenu, health }) {
+  const { user, logout } = useAuth()
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: Gauge },
     { id: 'cpu', label: 'CPU Metrics', icon: Cpu },
     { id: 'memory', label: 'Memory', icon: Zap },
     { id: 'iot', label: 'IoT Sensors', icon: Wifi },
-    { id: 'alerts', label: 'Alerts', icon: AlertCircle, badge: 'Soon' },
+    { id: 'alerts', label: 'Alerts', icon: AlertCircle },
   ]
 
   return (
@@ -61,9 +63,28 @@ export default function Sidebar({ activeMenu, setActiveMenu, health }) {
       </nav>
 
       {/* Footer */}
-      <div className="pt-4 border-t border-gray-700 text-xs text-gray-500">
-        <p>Version 1.0.0</p>
-        <p>Real-Time Monitoring System</p>
+      <div className="pt-4 border-t border-gray-700 space-y-4">
+        {/* User Info */}
+        {user && (
+          <div className="text-xs">
+            <p className="text-gray-500 mb-1">Logged in as</p>
+            <p className="text-neon-cyan font-semibold">{user.username}</p>
+            <p className="text-gray-500 text-xs mt-1 capitalize">
+              Role: <span className="text-neon-yellow">{user.role}</span>
+            </p>
+          </div>
+        )}
+        
+        {/* Logout Button */}
+        <button
+          onClick={logout}
+          className="w-full flex items-center gap-2 px-4 py-2 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all text-sm"
+        >
+          <LogOut className="w-4 h-4" />
+          <span>Logout</span>
+        </button>
+        
+        <p className="text-gray-500 text-xs">Version 1.0.0</p>
       </div>
     </div>
   )

@@ -119,6 +119,40 @@ async def delete_user(user_id: int, admin: User = Depends(verify_admin), db: Ses
     return {"message": "User deleted successfully"}
 
 
+@router.put("/users/{user_id}/role")
+async def change_user_role(user_id: int, role: str, admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
+    """Change user's role to admin or user"""
+    # Prevent changing own role
+    if user_id == admin.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change your own role"
+        )
+    
+    if role not in ["admin", "user"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid role. Must be 'admin' or 'user'"
+        )
+    
+    user = crud.change_user_role(db, user_id, role)
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    return {
+        "message": f"User {user.username} role changed to {role}",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role
+        }
+    }
+
+
 # ============== DEVICE MANAGEMENT ==============
 
 @router.post("/devices", response_model=DeviceResponse, status_code=201)
@@ -272,4 +306,67 @@ async def get_device_users(device_id: int, admin: User = Depends(verify_admin), 
             for u in users
         ],
         "count": len(users)
+    }
+
+
+# ============== ALERT THRESHOLDS ==============
+
+@router.get("/alert-thresholds")
+async def get_alert_thresholds(admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
+    """Get all alert thresholds"""
+    thresholds = crud.get_all_alert_thresholds(db)
+    return {
+        "thresholds": thresholds,
+        "count": len(thresholds)
+    }
+
+
+@router.get("/alert-thresholds/{metric_type}")
+async def get_alert_threshold(metric_type: str, admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
+    """Get alert threshold for a specific metric type"""
+    threshold = crud.get_alert_threshold(db, metric_type)
+    
+    if not threshold:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No threshold configured for {metric_type}"
+        )
+    
+    return threshold
+
+
+@router.put("/alert-thresholds/{metric_type}")
+async def update_alert_threshold(
+    metric_type: str,
+    warning_threshold: float = None,
+    critical_threshold: float = None,
+    warning_low: float = None,
+    warning_high: float = None,
+    critical_low: float = None,
+    critical_high: float = None,
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """Update alert threshold for a metric type"""
+    threshold = crud.update_alert_threshold(
+        db,
+        metric_type,
+        warning_threshold=warning_threshold,
+        critical_threshold=critical_threshold,
+        warning_low=warning_low,
+        warning_high=warning_high,
+        critical_low=critical_low,
+        critical_high=critical_high,
+        admin_id=admin.id
+    )
+    
+    if not threshold:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No threshold configured for {metric_type}"
+        )
+    
+    return {
+        "message": f"Alert threshold for {metric_type} updated successfully",
+        "threshold": threshold
     }

@@ -4,10 +4,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, SessionLocal
 from app.api import routes_metrics, routes_alerts, routes_auth, routes_admin
-from app.crud import delete_old_alerts, get_user_by_username, create_user
+from app.crud import delete_old_alerts, get_user_by_username, create_user, get_alert_threshold
 from app.schemas import UserRegister
 from app.api.routes_auth import hash_password
-from app.models import Device, UserDevicePermission
+from app.models import Device, UserDevicePermission, AlertThreshold
+from datetime import datetime, timedelta, timezone
 
 # Initialize database on startup
 init_db()
@@ -103,6 +104,43 @@ async def startup_event():
             
     except Exception as e:
         print(f"✗ [Startup Error] {str(e)}")
+    finally:
+        db.close()
+    
+    # Initialize alert thresholds
+    db = SessionLocal()
+    try:
+        default_thresholds = [
+            {"metric_type": "cpu", "warning": 80, "critical": 90, "unit": "%"},
+            {"metric_type": "memory", "warning": 85, "critical": 95, "unit": "%"},
+            {"metric_type": "temperature", "warning": 30, "critical": 35, "unit": "°C"},
+            {"metric_type": "humidity", "warning_low": 30, "warning_high": 85, "critical_low": 20, "critical_high": 95, "unit": "%"},
+            {"metric_type": "soil_moisture", "warning_low": 20, "warning_high": 90, "critical_low": 10, "critical_high": 100, "unit": "%"},
+            {"metric_type": "light_intensity", "warning_low": 50, "warning_high": 900, "critical_low": 100, "critical_high": 950, "unit": "lux"},
+            {"metric_type": "pressure", "warning_low": 950, "warning_high": 1050, "critical_low": 940, "critical_high": 1060, "unit": "hPa"}
+        ]
+        
+        for threshold_config in default_thresholds:
+            existing = get_alert_threshold(db, threshold_config["metric_type"])
+            if not existing:
+                vietnam_tz = timezone(timedelta(hours=7))
+                threshold = AlertThreshold(
+                    metric_type=threshold_config["metric_type"],
+                    warning_threshold=threshold_config.get("warning"),
+                    critical_threshold=threshold_config.get("critical"),
+                    warning_low=threshold_config.get("warning_low"),
+                    warning_high=threshold_config.get("warning_high"),
+                    critical_low=threshold_config.get("critical_low"),
+                    critical_high=threshold_config.get("critical_high"),
+                    unit=threshold_config["unit"],
+                    updated_by=1,  # admin user
+                    updated_at=datetime.now(vietnam_tz)
+                )
+                db.add(threshold)
+                db.commit()
+                print(f"✓ [Startup] Created alert threshold for: {threshold_config['metric_type']}")
+    except Exception as e:
+        print(f"✗ [Startup Error] Failed to initialize alert thresholds: {str(e)}")
     finally:
         db.close()
 

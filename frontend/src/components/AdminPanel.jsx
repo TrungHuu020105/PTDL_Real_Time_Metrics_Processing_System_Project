@@ -4,7 +4,7 @@ import api from '../api'
 import { useAuth } from '../context/AuthContext'
 
 export default function AdminPanel() {
-  const { user } = useAuth()
+  const { user: currentUser } = useAuth()
   const [activeTab, setActiveTab] = useState('pending-users')
   const [pendingUsers, setPendingUsers] = useState([])
   const [allUsers, setAllUsers] = useState([])
@@ -133,6 +133,17 @@ export default function AdminPanel() {
       fetchDevices()
     } catch (error) {
       setMessage('Failed to update device: ' + error.response?.data?.detail)
+    }
+  }
+
+  // Change user role
+  const changeUserRole = async (userId, newRole) => {
+    try {
+      await api.put(`/api/admin/users/${userId}/role?role=${newRole}`)
+      setMessage(`User role changed to ${newRole} successfully`)
+      fetchAllUsers()
+    } catch (error) {
+      setMessage('Failed to change user role: ' + error.response?.data?.detail)
     }
   }
 
@@ -289,18 +300,48 @@ export default function AdminPanel() {
                     {user.is_approved ? ' ✓ Approved' : ' ⏳ Pending'}
                   </p>
                 </div>
-                {user.role !== 'admin' && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      deleteUser(user.id)
-                    }}
-                    className="ml-2 px-3 py-1 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all"
-                    title="Delete user"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
-                )}
+                <div className="flex gap-2">
+                  {user.role === 'user' && user.id !== currentUser?.id && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (confirm(`Promote ${user.username} to admin?`)) {
+                          changeUserRole(user.id, 'admin')
+                        }
+                      }}
+                      className="px-3 py-1 bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-all text-xs font-semibold"
+                      title="Make admin"
+                    >
+                      Make Admin
+                    </button>
+                  )}
+                  {user.role === 'admin' && user.id !== currentUser?.id && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (confirm(`Demote ${user.username} to user?`)) {
+                          changeUserRole(user.id, 'user')
+                        }
+                      }}
+                      className="px-3 py-1 bg-yellow-500/20 text-yellow-400 rounded hover:bg-yellow-500/30 transition-all text-xs font-semibold"
+                      title="Remove admin"
+                    >
+                      Demote
+                    </button>
+                  )}
+                  {user.role !== 'admin' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        deleteUser(user.id)
+                      }}
+                      className="px-3 py-1 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all"
+                      title="Delete user"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Show devices when user is selected */}

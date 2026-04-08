@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from app.models import Metric, Alert, User, Device, UserDevicePermission
+from app.models import Metric, Alert, User, Device, UserDevicePermission, AlertThreshold
 from app.schemas import MetricCreate, AlertCreate, UserRegister, DeviceCreate
 
 
@@ -467,3 +467,68 @@ def get_metrics_history_for_user(
     ).order_by(Metric.timestamp.asc()).all()
     
     return metrics
+
+# ============== USER ROLE MANAGEMENT ==============
+
+def change_user_role(db: Session, user_id: int, new_role: str) -> Optional[User]:
+    """Change user's role (admin/user)"""
+    user = get_user_by_id(db, user_id)
+    
+    if user and new_role in ["admin", "user"]:
+        user.role = new_role
+        db.commit()
+        db.refresh(user)
+    
+    return user
+
+
+# ============== ALERT THRESHOLDS ==============
+
+def get_alert_threshold(db: Session, metric_type: str) -> Optional[AlertThreshold]:
+    """Get alert threshold for a metric type"""
+    return db.query(AlertThreshold).filter(
+        AlertThreshold.metric_type == metric_type
+    ).first()
+
+
+def get_all_alert_thresholds(db: Session) -> List[AlertThreshold]:
+    """Get all alert thresholds"""
+    return db.query(AlertThreshold).all()
+
+
+def update_alert_threshold(
+    db: Session,
+    metric_type: str,
+    warning_threshold: Optional[float] = None,
+    critical_threshold: Optional[float] = None,
+    warning_low: Optional[float] = None,
+    warning_high: Optional[float] = None,
+    critical_low: Optional[float] = None,
+    critical_high: Optional[float] = None,
+    admin_id: int = None
+) -> Optional[AlertThreshold]:
+    """Update alert threshold configuration"""
+    threshold = get_alert_threshold(db, metric_type)
+    
+    if threshold:
+        if warning_threshold is not None:
+            threshold.warning_threshold = warning_threshold
+        if critical_threshold is not None:
+            threshold.critical_threshold = critical_threshold
+        if warning_low is not None:
+            threshold.warning_low = warning_low
+        if warning_high is not None:
+            threshold.warning_high = warning_high
+        if critical_low is not None:
+            threshold.critical_low = critical_low
+        if critical_high is not None:
+            threshold.critical_high = critical_high
+        if admin_id:
+            threshold.updated_by = admin_id
+        
+        vietnam_tz = timezone(timedelta(hours=7))
+        threshold.updated_at = datetime.now(vietnam_tz)
+        db.commit()
+        db.refresh(threshold)
+    
+    return threshold

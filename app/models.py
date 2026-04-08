@@ -96,3 +96,23 @@ class UserDevicePermission(Base):
 
     def __repr__(self):
         return f"<UserDevicePermission(user_id={self.user_id}, device_id={self.device_id})>"
+
+
+class AlertThreshold(Base):
+    """Alert thresholds configuration for each metric type"""
+    __tablename__ = "alert_thresholds"
+
+    id = Column(Integer, primary_key=True, index=True)
+    metric_type = Column(String(50), unique=True, nullable=False, index=True)  # cpu, memory, temperature, etc
+    warning_threshold = Column(Float, nullable=True)  # Single warning threshold
+    critical_threshold = Column(Float, nullable=True)  # Single critical threshold
+    warning_low = Column(Float, nullable=True)  # For metrics with low/high ranges
+    warning_high = Column(Float, nullable=True)
+    critical_low = Column(Float, nullable=True)
+    critical_high = Column(Float, nullable=True)
+    unit = Column(String(20), nullable=False)  # %, °C, hPa, lux, etc
+    updated_by = Column(Integer, nullable=False)  # Admin ID who updated
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
+
+    def __repr__(self):
+        return f"<AlertThreshold(metric_type={self.metric_type})>"

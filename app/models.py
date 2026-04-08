@@ -145,3 +145,20 @@ class ServerSubscription(Base):
 
     def __repr__(self):
         return f"<ServerSubscription(user_id={self.user_id}, server_id={self.server_id})>"
+
+
+class ServerSubscriptionRequest(Base):
+    """Server Subscription Request - User requests to subscribe, admin approves/rejects"""
+    __tablename__ = "server_subscription_requests"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)  # User requesting
+    server_id = Column(Integer, nullable=False, index=True)  # Server requested
+    status = Column(String(20), default="pending", nullable=False)  # pending, approved, rejected
+    requested_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
+    approved_by = Column(Integer, nullable=True)  # Admin ID who approved
+    approved_at = Column(DateTime, nullable=True)
+    rejection_reason = Column(String(255), nullable=True)  # Reason for rejection
+
+    def __repr__(self):
+        return f"<ServerSubscriptionRequest(user_id={self.user_id}, server_id={self.server_id}, status={self.status})>"

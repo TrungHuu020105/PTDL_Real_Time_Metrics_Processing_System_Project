@@ -1,10 +1,27 @@
 """Server management routes - Admin creates, User subscribes"""
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
+from typing import Optional
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import AvailableServer, ServerSubscription, User
+from app.models import AvailableServer, ServerSubscription, ServerSubscriptionRequest, User
 from app.api.routes_auth import get_current_user
+from app.system_metrics import SystemMetricsCollector
+from app import crud
+
+
+# ============== REQUEST MODELS ==============
+class ServerUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    specs: Optional[str] = None
+    price_per_hour: Optional[float] = None
+    cpu_cores: Optional[int] = None
+    ram_gb: Optional[int] = None
+    os_type: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
@@ -259,4 +276,269 @@ async def get_my_subscriptions(
     return {
         "servers": servers,
         "total": len(servers)
+    }
+
+
+# ============== USER: SERVER SUBSCRIPTION REQUESTS ==============
+
+@router.post("/requests")
+async def create_subscription_request(
+    server_id: int,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """User creates a request to subscribe to a server"""
+    # Check if server exists
+    server = db.query(AvailableServer).filter(AvailableServer.id == server_id).first()
+    if not server:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Server not found"
+        )
+    
+    # Create subscription request using CRUD
+    request = crud.create_subscription_request(db, user.id, server_id)
+    
+    if not request:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Unable to create request - you may already have a pending request for this server"
+        )
+    
+    return {
+        "id": request.id,
+        "user_id": request.user_id,
+        "server_id": request.server_id,
+        "status": request.status,
+        "requested_at": request.requested_at
+    }
+
+
+@router.get("/requests")
+async def get_user_requests(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """User views their subscription requests"""
+    requests = crud.get_user_subscription_requests(db, user.id)
+    
+    result = []
+    for req in requests:
+        # Get server info
+        server = db.query(AvailableServer).filter(AvailableServer.id == req.server_id).first()
+        result.append({
+            "id": req.id,
+            "server_id": req.server_id,
+            "server_name": server.name if server else "Unknown",
+            "status": req.status,
+            "requested_at": req.requested_at,
+            "approved_at": req.approved_at,
+            "rejection_reason": req.rejection_reason
+        })
+    
+    return {
+        "requests": result,
+        "total": len(result)
+    }
+
+
+# ============== ADMIN: MANAGE SUBSCRIPTION REQUESTS ==============
+
+@router.get("/admin/requests/pending", dependencies=[Depends(verify_admin)])
+async def get_pending_requests(
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """[ADMIN] Get all pending subscription requests"""
+    requests = crud.get_pending_subscription_requests(db)
+    
+    result = []
+    for req in requests:
+        # Get user and server info
+        user = db.query(User).filter(User.id == req.user_id).first()
+        server = db.query(AvailableServer).filter(AvailableServer.id == req.server_id).first()
+        
+        result.append({
+            "id": req.id,
+            "user_id": req.user_id,
+            "user_email": user.email if user else "Unknown",
+            "user_name": f"{user.first_name} {user.last_name}".strip() if user else "Unknown",
+            "server_id": req.server_id,
+            "server_name": server.name if server else "Unknown",
+            "server_specs": server.specs if server else "Unknown",
+            "status": req.status,
+            "requested_at": req.requested_at
+        })
+    
+    return {
+        "requests": result,
+        "total": len(result)
+    }
+
+
+@router.put("/admin/requests/{request_id}/approve")
+async def approve_request(
+    request_id: int,
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """[ADMIN] Approve a subscription request - also creates the subscription"""
+    req = db.query(ServerSubscriptionRequest).filter(
+        ServerSubscriptionRequest.id == request_id
+    ).first()
+    
+    if not req:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Request not found"
+        )
+    
+    if req.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Can only approve pending requests, this is {req.status}"
+        )
+    
+    # Use CRUD to approve
+    approved_req = crud.approve_subscription_request(db, request_id, admin.id)
+    
+    return {
+        "id": approved_req.id,
+        "status": approved_req.status,
+        "approved_at": approved_req.approved_at,
+        "message": "Request approved and subscription created"
+    }
+
+
+@router.put("/admin/requests/{request_id}/reject")
+async def reject_request(
+    request_id: int,
+    reason: str = "",
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """[ADMIN] Reject a subscription request"""
+    req = db.query(ServerSubscriptionRequest).filter(
+        ServerSubscriptionRequest.id == request_id
+    ).first()
+    
+    if not req:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Request not found"
+        )
+    
+    if req.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Can only reject pending requests, this is {req.status}"
+        )
+    
+    # Use CRUD to reject
+    rejected_req = crud.reject_subscription_request(db, request_id, reason)
+    
+    return {
+        "id": rejected_req.id,
+        "status": rejected_req.status,
+        "rejection_reason": rejected_req.rejection_reason,
+        "message": "Request rejected"
+    }
+
+
+# ============== SYSTEM INFO ==============
+
+@router.get("/admin/system-info", dependencies=[Depends(verify_admin)])
+async def get_system_info(admin: User = Depends(verify_admin)):
+    """[ADMIN] Get system hardware information (CPU cores, RAM, OS)"""
+    system_info = SystemMetricsCollector.get_system_info()
+    return {
+        "cpu_cores": system_info["cpu_cores"],
+        "ram_gb": system_info["ram_gb"],
+        "os_type": system_info["os_type"]
+    }
+
+
+# ============== ADMIN: SET SERVER PRICE ==============
+
+@router.put("/admin/servers/{server_id}/price")
+async def set_server_price(
+    server_id: int,
+    price_per_hour: float,
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """[ADMIN] Set the price of a server"""
+    server = db.query(AvailableServer).filter(AvailableServer.id == server_id).first()
+    
+    if not server:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Server not found"
+        )
+    
+    if price_per_hour < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Price cannot be negative"
+        )
+    
+    server.price_per_hour = price_per_hour
+    db.commit()
+    db.refresh(server)
+    
+    return {
+        "id": server.id,
+        "name": server.name,
+        "price_per_hour": server.price_per_hour,
+        "message": "Price updated successfully"
+    }
+
+
+@router.patch("/admin/servers/{server_id}")
+async def update_server(
+    server_id: int,
+    server_data: ServerUpdateRequest,
+    admin: User = Depends(verify_admin),
+    db: Session = Depends(get_db)
+):
+    """[ADMIN] Update server information (name, specs, price)"""
+    server = db.query(AvailableServer).filter(AvailableServer.id == server_id).first()
+    
+    if not server:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Server not found"
+        )
+    
+    # Update only provided fields (not None)
+    if server_data.name is not None:
+        server.name = server_data.name
+    if server_data.specs is not None:
+        server.specs = server_data.specs
+    if server_data.price_per_hour is not None:
+        if server_data.price_per_hour < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Price cannot be negative"
+            )
+        server.price_per_hour = server_data.price_per_hour
+    if server_data.cpu_cores is not None:
+        server.cpu_cores = server_data.cpu_cores
+    if server_data.ram_gb is not None:
+        server.ram_gb = server_data.ram_gb
+    if server_data.os_type is not None:
+        server.os_type = server_data.os_type
+    
+    db.commit()
+    db.refresh(server)
+    
+    return {
+        "id": server.id,
+        "name": server.name,
+        "specs": server.specs,
+        "cpu_cores": server.cpu_cores,
+        "ram_gb": server.ram_gb,
+        "os_type": server.os_type,
+        "price_per_hour": server.price_per_hour,
+        "message": "Server updated successfully"
     }

@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from app.models import Metric, Alert, User, Device, UserDevicePermission, IoTDevice
+from app.models import Metric, Alert, User, Device, UserDevicePermission, IoTDevice, ServerSubscriptionRequest
 from app.schemas import MetricCreate, AlertCreate, UserRegister, DeviceCreate
 
 
@@ -483,3 +483,84 @@ def get_metrics_history_for_user(
     ).order_by(Metric.timestamp.asc()).all()
     
     return metrics
+
+
+# ============== SERVER SUBSCRIPTION REQUESTS ==============
+
+def create_subscription_request(db: Session, user_id: int, server_id: int) -> ServerSubscriptionRequest:
+    """User creates a subscription request for a server"""
+    # Check if request already pending
+    existing = db.query(ServerSubscriptionRequest).filter(
+        ServerSubscriptionRequest.user_id == user_id,
+        ServerSubscriptionRequest.server_id == server_id,
+        ServerSubscriptionRequest.status == "pending"
+    ).first()
+    
+    if existing:
+        return existing
+    
+    request = ServerSubscriptionRequest(
+        user_id=user_id,
+        server_id=server_id,
+        status="pending"
+    )
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+    return request
+
+
+def get_pending_subscription_requests(db: Session) -> List[ServerSubscriptionRequest]:
+    """Admin views all pending subscription requests"""
+    return db.query(ServerSubscriptionRequest).filter(
+        ServerSubscriptionRequest.status == "pending"
+    ).order_by(ServerSubscriptionRequest.requested_at.desc()).all()
+
+
+def approve_subscription_request(db: Session, request_id: int, admin_id: int) -> Optional[ServerSubscriptionRequest]:
+    """Admin approves a subscription request - creates subscription"""
+    from app.models import ServerSubscription
+    
+    req = db.query(ServerSubscriptionRequest).filter(ServerSubscriptionRequest.id == request_id).first()
+    
+    if not req:
+        return None
+    
+    # Mark request as approved
+    vietnam_tz = timezone(timedelta(hours=7))
+    req.status = "approved"
+    req.approved_by = admin_id
+    req.approved_at = datetime.now(vietnam_tz)
+    
+    # Create subscription
+    subscription = ServerSubscription(
+        user_id=req.user_id,
+        server_id=req.server_id
+    )
+    db.add(subscription)
+    db.commit()
+    db.refresh(req)
+    return req
+
+
+def reject_subscription_request(db: Session, request_id: int, reason: str = None) -> Optional[ServerSubscriptionRequest]:
+    """Admin rejects a subscription request"""
+    req = db.query(ServerSubscriptionRequest).filter(ServerSubscriptionRequest.id == request_id).first()
+    
+    if not req:
+        return None
+    
+    vietnam_tz = timezone(timedelta(hours=7))
+    req.status = "rejected"
+    req.rejection_reason = reason
+    req.approved_at = datetime.now(vietnam_tz)  # Reuse for rejection timestamp
+    db.commit()
+    db.refresh(req)
+    return req
+
+
+def get_user_subscription_requests(db: Session, user_id: int) -> List[ServerSubscriptionRequest]:
+    """User views their own subscription requests"""
+    return db.query(ServerSubscriptionRequest).filter(
+        ServerSubscriptionRequest.user_id == user_id
+    ).order_by(ServerSubscriptionRequest.requested_at.desc()).all()

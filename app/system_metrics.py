@@ -4,6 +4,7 @@ Uses psutil to monitor actual system performance.
 """
 
 import psutil
+import platform
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
 from app.schemas import MetricCreate
@@ -190,4 +191,22 @@ class SystemMetricsCollector:
                     "percent": memory_value
                 }
             }
+        }
+
+    @staticmethod
+    def get_system_info() -> Dict[str, Any]:
+        """
+        Get system hardware information.
+        
+        Returns:
+            Dictionary with CPU cores, RAM (GB), and OS type
+        """
+        cpu_count_physical = psutil.cpu_count(logical=False) or psutil.cpu_count(logical=True) or 1
+        ram_total_gb = round(psutil.virtual_memory().total / (1024 ** 3), 2)
+        os_type = platform.system()
+        
+        return {
+            "cpu_cores": cpu_count_physical,
+            "ram_gb": ram_total_gb,
+            "os_type": os_type
         }

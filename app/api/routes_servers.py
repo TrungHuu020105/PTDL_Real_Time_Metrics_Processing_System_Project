@@ -1,6 +1,6 @@
 """Server management routes - Admin creates, User subscribes"""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -22,6 +22,10 @@ class ServerUpdateRequest(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+class SubscriptionRequestPayload(BaseModel):
+    server_id: int
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
@@ -283,13 +287,22 @@ async def get_my_subscriptions(
 
 @router.post("/requests")
 async def create_subscription_request(
-    server_id: int,
+    server_id: Optional[int] = None,
+    payload: Optional[SubscriptionRequestPayload] = Body(default=None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """User creates a request to subscribe to a server"""
+    effective_server_id = server_id if server_id is not None else (payload.server_id if payload else None)
+
+    if effective_server_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="server_id is required"
+        )
+
     # Check if server exists
-    server = db.query(AvailableServer).filter(AvailableServer.id == server_id).first()
+    server = db.query(AvailableServer).filter(AvailableServer.id == effective_server_id).first()
     if not server:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -297,7 +310,7 @@ async def create_subscription_request(
         )
     
     # Create subscription request using CRUD
-    request = crud.create_subscription_request(db, user.id, server_id)
+    request = crud.create_subscription_request(db, user.id, effective_server_id)
     
     if not request:
         raise HTTPException(
@@ -357,12 +370,13 @@ async def get_pending_requests(
         # Get user and server info
         user = db.query(User).filter(User.id == req.user_id).first()
         server = db.query(AvailableServer).filter(AvailableServer.id == req.server_id).first()
+        user_display_name = user.username if user else "Unknown"
         
         result.append({
             "id": req.id,
             "user_id": req.user_id,
             "user_email": user.email if user else "Unknown",
-            "user_name": f"{user.first_name} {user.last_name}".strip() if user else "Unknown",
+            "user_name": user_display_name,
             "server_id": req.server_id,
             "server_name": server.name if server else "Unknown",
             "server_specs": server.specs if server else "Unknown",

@@ -30,6 +30,7 @@ export default function ServerStore() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [selectedServerForEdit, setSelectedServerForEdit] = useState(null)
   const [editFormData, setEditFormData] = useState({})
+  const [creatingLocalhostServer, setCreatingLocalhostServer] = useState(false)
   const [systemInfo, setSystemInfo] = useState({ cpu_cores: 0, ram_gb: 0, os_type: '' })
   const [loadingSystemInfo, setLoadingSystemInfo] = useState(false)
   const [showServerChartModal, setShowServerChartModal] = useState(false)
@@ -50,6 +51,16 @@ export default function ServerStore() {
       fetchAvailableServers()
       fetchUserRequests()
     }
+  }, [isAdmin])
+
+  useEffect(() => {
+    if (!isAdmin) return
+
+    const interval = setInterval(() => {
+      fetchPendingRequests()
+    }, 5000)
+
+    return () => clearInterval(interval)
   }, [isAdmin])
 
   // Fetch localhost metrics every 5 seconds
@@ -269,25 +280,17 @@ export default function ServerStore() {
 
     try {
       setUpdatingServer(selectedServerForEdit.id)
-      
-      // Debug: log current form data
-      console.log('editFormData.price_per_month:', editFormData.price_per_month)
-      console.log('editFormData.name:', editFormData.name)
-      console.log('editFormData.specs:', editFormData.specs)
-      
+
       // Convert monthly price back to hourly for API
-      const pricePerHour = parseFloat(editFormData.price_per_month || 0) / 730
-      console.log('Converted price_per_hour:', pricePerHour)
-      
+      const monthlyPrice = Number(editFormData.price_per_month ?? 0)
+      const pricePerHour = Number.isFinite(monthlyPrice) ? monthlyPrice / 730 : 0
+
       const dataToSend = {
         name: editFormData.name,
         specs: editFormData.specs,
         price_per_hour: pricePerHour
       }
-      
-      console.log('Sending update to server ID:', selectedServerForEdit.id)
-      console.log('Data to send:', dataToSend)
-      
+
       await api.patch(`/api/servers/admin/servers/${selectedServerForEdit.id}`, dataToSend)
       alert('Server updated successfully!')
       await fetchAllServers()
@@ -394,7 +397,9 @@ export default function ServerStore() {
   const handleRequestSubscription = async (serverId) => {
     try {
       setSubscribing(prev => ({ ...prev, [serverId]: true }))
-      const response = await api.post('/api/servers/requests', { server_id: serverId })
+      const response = await api.post('/api/servers/requests', null, {
+        params: { server_id: serverId }
+      })
       if (response.data) {
         alert('Subscription request sent! Please wait for admin approval.')
         await fetchUserRequests()
@@ -529,10 +534,10 @@ export default function ServerStore() {
         <div className="border-t border-gray-700 pt-4">
           {server.price_per_hour ? (
             <div className="mb-4">
-              <p className="text-sm text-gray-500 mb-1">Pricing</p>
+              <p className="text-sm text-gray-500 mb-1">Monthly Price</p>
               <p className="text-2xl font-bold text-white">
-                ${server.price_per_hour}
-                <span className="text-sm text-gray-400 font-normal">/hour</span>
+                ${(server.price_per_hour * 730).toFixed(2)}
+                <span className="text-sm text-gray-400 font-normal">/month</span>
               </p>
             </div>
           ) : (
@@ -561,6 +566,71 @@ export default function ServerStore() {
         </div>
       </div>
     )
+  }
+
+  const matchedLocalhostServer = allServers.find((server) => {
+    const name = (server.name || '').toLowerCase()
+    const specs = (server.specs || '').toLowerCase()
+    return (
+      specs.includes('system server') ||
+      specs.includes('metrics only') ||
+      name === 'server 1' ||
+      name.includes('localhost') ||
+      name.includes('local')
+    )
+  })
+
+  const matchedBySystemFingerprint = allServers.find((server) => {
+    if (!systemInfo.cpu_cores || !systemInfo.ram_gb || !systemInfo.os_type) {
+      return false
+    }
+
+    const sameCpu = Number(server.cpu_cores || 0) === Number(systemInfo.cpu_cores || 0)
+    const sameOs = (server.os_type || '').toLowerCase() === (systemInfo.os_type || '').toLowerCase()
+    const ramDiff = Math.abs(Number(server.ram_gb || 0) - Number(systemInfo.ram_gb || 0))
+
+    return sameCpu && sameOs && ramDiff <= 1
+  })
+
+  const firstServerById = [...allServers].sort((a, b) => a.id - b.id)[0] || null
+  const localhostServer = matchedLocalhostServer || matchedBySystemFingerprint || firstServerById
+
+  const nonLocalServers = localhostServer
+    ? allServers.filter((server) => server.id !== localhostServer.id)
+    : allServers
+
+  const localhostRequests = localhostServer ? getRequestsForServer(localhostServer.id) : []
+
+  const handleLocalhostEdit = async (e) => {
+    e.stopPropagation()
+
+    if (localhostServer) {
+      openEditModal(localhostServer)
+      return
+    }
+
+    try {
+      setCreatingLocalhostServer(true)
+
+      const response = await api.post('/api/servers/admin/servers', null, {
+        params: {
+          name: 'Server 1',
+          specs: 'System Server - Metrics Only',
+          cpu_cores: Number(systemInfo.cpu_cores) || 1,
+          ram_gb: Math.max(1, Math.round(Number(systemInfo.ram_gb) || 1)),
+          os_type: systemInfo.os_type || 'Localhost',
+          price_per_hour: 0
+        }
+      })
+
+      const createdServer = response.data
+      await fetchAllServers()
+      openEditModal(createdServer)
+    } catch (err) {
+      alert('Error: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setCreatingLocalhostServer(false)
+    }
   }
 
   return (
@@ -602,30 +672,28 @@ export default function ServerStore() {
             
             {/* Localhost Server Card for Admin */}
             <div 
-              onClick={() => fetchServerChart(1, 'Server 1')}
+              onClick={() => fetchServerChart(localhostServer?.id || 1, localhostServer?.name || 'Server 1')}
               className="mb-6 bg-dark-800 border border-neon-cyan/30 rounded-xl p-6 hover:border-neon-cyan/60 hover:cursor-pointer transition-all hover:bg-dark-700 relative"
             >
               {/* Edit Button - Top Right Corner */}
               <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  openEditModal({ id: 1, name: 'Server 1', specs: 'System Server - Metrics Only', price_per_hour: 0, cpu_cores: 0, ram_gb: 0, os_type: '' })
-                }}
-                className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1.5 bg-blue-500/20 text-blue-400 border border-blue-500/40 rounded-lg hover:bg-blue-500/30 transition-all"
+                onClick={handleLocalhostEdit}
+                disabled={creatingLocalhostServer}
+                className="absolute top-6 right-6 flex items-center gap-2 px-3 py-1.5 bg-blue-500/20 text-blue-400 border border-blue-500/40 rounded-lg hover:bg-blue-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Edit className="w-4 h-4" />
-                Edit
+                {creatingLocalhostServer ? 'Creating...' : 'Edit'}
               </button>
 
               <div className="flex items-start justify-between mb-4 pr-24">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
-                    <h3 className="text-lg font-bold text-white">Server 1</h3>
+                    <h3 className="text-lg font-bold text-white">{localhostServer?.name || 'Server 1'}</h3>
                     <span className="text-xs text-neon-cyan bg-neon-cyan/20 px-2 py-1 rounded">
                       Localhost
                     </span>
                   </div>
-                  <p className="text-sm text-gray-400 mb-3">System Server - Metrics Only</p>
+                  <p className="text-sm text-gray-400 mb-3">{localhostServer?.specs || 'System Server - Metrics Only'}</p>
 
                   {/* System Info Display */}
                   <div className="grid grid-cols-3 gap-3 mb-4">
@@ -645,7 +713,9 @@ export default function ServerStore() {
                 </div>
                 <div className="text-right">
                   <p className="text-xs text-gray-500 mb-1">Monthly Price</p>
-                  <p className="text-xl font-bold text-neon-yellow">$0.00</p>
+                  <p className="text-xl font-bold text-neon-yellow">
+                    ${localhostServer ? (localhostServer.price_per_hour * 730).toFixed(2) : '0.00'}
+                  </p>
                 </div>
               </div>
 
@@ -680,13 +750,27 @@ export default function ServerStore() {
                   </div>
                 </div>
               </div>
+
+              {localhostRequests.length > 0 && localhostServer && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSelectedServerForRequests(localhostServer)
+                    setShowRequestsModal(true)
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 rounded-lg hover:bg-yellow-500/30 transition-all whitespace-nowrap"
+                >
+                  <AlertCircle className="w-5 h-5" />
+                  {localhostRequests.length} Request{localhostRequests.length !== 1 ? 's' : ''}
+                </button>
+              )}
             </div>
 
-            {allServers.length === 0 ? (
+            {nonLocalServers.length === 0 ? (
               <p className="text-gray-400">No other servers available</p>
             ) : (
               <div className="space-y-4">
-                {allServers.map((server) => {
+                {nonLocalServers.map((server) => {
                   const serverRequests = getRequestsForServer(server.id)
 
                   return (
@@ -1084,64 +1168,6 @@ export default function ServerStore() {
               <p className="text-3xl font-bold text-neon-purple">
                 ${(myServers.reduce((sum, s) => sum + (s.price_per_hour || 0) * 730, 0)).toFixed(2)}
               </p>
-            </div>
-          </div>
-
-          {/* Your Servers Section Header */}
-          <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-bold text-white">Your Servers</h2>
-          </div>
-
-          {/* Localhost Server Card */}
-          <div
-            onClick={handleOpenChart}
-            className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-6 hover:border-neon-cyan/60 hover:cursor-pointer transition-all hover:bg-dark-700"
-          >
-            <div className="flex items-start justify-between mb-4">
-              <div>
-                <h3 className="text-lg font-bold text-white mb-1">Server 1</h3>
-                <p className="text-xs text-gray-500 font-mono">Source: localhost</p>
-              </div>
-              <span className="text-xs text-neon-cyan bg-neon-cyan/20 px-2 py-1 rounded">
-                System Server
-              </span>
-            </div>
-
-            {/* Real-time Metrics Display */}
-            <div className="bg-dark-900/50 rounded-lg p-4 mb-4 border border-neon-cyan/20 space-y-3">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-xs text-gray-400">CPU Usage</p>
-                  <span className="text-sm font-bold text-neon-yellow">
-                    {localhostMetrics.cpu !== null ? `${localhostMetrics.cpu.toFixed(1)}%` : 'N/A'}
-                  </span>
-                </div>
-                <div className="w-full bg-dark-800 rounded-full h-1.5">
-                  <div
-                    className="bg-neon-yellow h-1.5 rounded-full transition-all"
-                    style={{ width: `${localhostMetrics.cpu || 0}%` }}
-                  ></div>
-                </div>
-              </div>
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <p className="text-xs text-gray-400">Memory Usage</p>
-                  <span className="text-sm font-bold text-neon-cyan">
-                    {localhostMetrics.memory !== null ? `${localhostMetrics.memory.toFixed(1)}%` : 'N/A'}
-                  </span>
-                </div>
-                <div className="w-full bg-dark-800 rounded-full h-1.5">
-                  <div
-                    className="bg-neon-cyan h-1.5 rounded-full transition-all"
-                    style={{ width: `${localhostMetrics.memory || 0}%` }}
-                  ></div>
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 mb-4">
-              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-              <span className="text-xs text-green-400">Active</span>
             </div>
           </div>
 

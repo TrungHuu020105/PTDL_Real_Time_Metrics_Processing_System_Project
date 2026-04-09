@@ -22,6 +22,7 @@ export default function ServerStore() {
   // Admin state
   const [allServers, setAllServers] = useState([])
   const [pendingRequests, setPendingRequests] = useState([])
+  const [pendingRequestsError, setPendingRequestsError] = useState('')
   const [editingPrice, setEditingPrice] = useState({})
   const [updatingServer, setUpdatingServer] = useState(null)
   const [showRequestsModal, setShowRequestsModal] = useState(false)
@@ -33,6 +34,7 @@ export default function ServerStore() {
   const [creatingLocalhostServer, setCreatingLocalhostServer] = useState(false)
   const [systemInfo, setSystemInfo] = useState({ cpu_cores: 0, ram_gb: 0, os_type: '' })
   const [loadingSystemInfo, setLoadingSystemInfo] = useState(false)
+  const [adminServerMetrics, setAdminServerMetrics] = useState({})
   const [showServerChartModal, setShowServerChartModal] = useState(false)
   const [selectedServerForChart, setSelectedServerForChart] = useState(null)
   const [serverChartData, setServerChartData] = useState([])
@@ -68,7 +70,9 @@ export default function ServerStore() {
     const fetchMetrics = async () => {
       try {
         setLoadingMetrics(true)
-        const response = await api.get('/api/metrics/latest')
+        const response = await api.get('/api/metrics/latest', {
+          params: { source: 'system_monitor' }
+        })
         if (response.data) {
           setLocalhostMetrics({
             cpu: response.data.latest_cpu,
@@ -181,8 +185,10 @@ export default function ServerStore() {
     try {
       const response = await api.get('/api/servers/admin/requests/pending')
       setPendingRequests(response.data.requests || [])
+      setPendingRequestsError('')
     } catch (err) {
       console.error('Failed to fetch pending requests:', err)
+      setPendingRequestsError(err.response?.data?.detail || err.message || 'Unknown error')
     }
   }
 
@@ -264,8 +270,11 @@ export default function ServerStore() {
       os_type: server.os_type || ''
     })
     setShowEditModal(true)
-    // Fetch system info in background (no await)
-    fetchSystemInfo()
+
+    // Only refresh host hardware info when editing localhost server
+    if (localhostServer && server.id === localhostServer.id) {
+      fetchSystemInfo()
+    }
   }
 
   const closeEditModal = () => {
@@ -601,6 +610,66 @@ export default function ServerStore() {
 
   const localhostRequests = localhostServer ? getRequestsForServer(localhostServer.id) : []
 
+  useEffect(() => {
+    if (!isAdmin) {
+      setAdminServerMetrics({})
+      return
+    }
+
+    if (allServers.length === 0) {
+      setAdminServerMetrics({})
+      return
+    }
+
+    let isMounted = true
+
+    const getSourceForServer = (server) => {
+      if (localhostServer && server.id === localhostServer.id) {
+        return 'system_monitor'
+      }
+      return `server_${server.id}`
+    }
+
+    const fetchAdminServerMetrics = async () => {
+      try {
+        const metricEntries = await Promise.all(
+          allServers.map(async (server) => {
+            const source = getSourceForServer(server)
+            try {
+              const response = await api.get('/api/metrics/latest', {
+                params: { source }
+              })
+
+              return [
+                server.id,
+                {
+                  cpu: response.data?.latest_cpu ?? null,
+                  memory: response.data?.latest_memory ?? null
+                }
+              ]
+            } catch {
+              return [server.id, { cpu: null, memory: null }]
+            }
+          })
+        )
+
+        if (isMounted) {
+          setAdminServerMetrics(Object.fromEntries(metricEntries))
+        }
+      } catch (err) {
+        console.error('Failed to fetch admin server metrics:', err)
+      }
+    }
+
+    fetchAdminServerMetrics()
+    const interval = setInterval(fetchAdminServerMetrics, 5000)
+
+    return () => {
+      isMounted = false
+      clearInterval(interval)
+    }
+  }, [isAdmin, allServers, localhostServer])
+
   const handleLocalhostEdit = async (e) => {
     e.stopPropagation()
 
@@ -632,6 +701,24 @@ export default function ServerStore() {
       setCreatingLocalhostServer(false)
     }
   }
+
+  const isEditingLocalhost = Boolean(
+    selectedServerForEdit && localhostServer && selectedServerForEdit.id === localhostServer.id
+  )
+
+  const editHardwareInfo = {
+    cpu_cores: isEditingLocalhost
+      ? Number(systemInfo.cpu_cores) || Number(editFormData.cpu_cores) || Number(selectedServerForEdit?.cpu_cores) || 0
+      : Number(editFormData.cpu_cores) || Number(selectedServerForEdit?.cpu_cores) || 0,
+    ram_gb: isEditingLocalhost
+      ? Number(systemInfo.ram_gb) || Number(editFormData.ram_gb) || Number(selectedServerForEdit?.ram_gb) || 0
+      : Number(editFormData.ram_gb) || Number(selectedServerForEdit?.ram_gb) || 0,
+    os_type: isEditingLocalhost
+      ? systemInfo.os_type || editFormData.os_type || selectedServerForEdit?.os_type || 'Unknown'
+      : editFormData.os_type || selectedServerForEdit?.os_type || 'Unknown'
+  }
+
+  const showEditHardwareLoading = isEditingLocalhost && loadingSystemInfo
 
   return (
     <div className="p-8 space-y-8">
@@ -665,6 +752,14 @@ export default function ServerStore() {
               </p>
             </div>
           </div>
+
+          {pendingRequestsError && (
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+              <p className="text-sm text-red-300">
+                Failed to load pending requests: {pendingRequestsError}
+              </p>
+            </div>
+          )}
 
           {/* Servers Grid - Admin */}
           <div>
@@ -772,6 +867,7 @@ export default function ServerStore() {
               <div className="space-y-4">
                 {nonLocalServers.map((server) => {
                   const serverRequests = getRequestsForServer(server.id)
+                  const serverMetrics = adminServerMetrics[server.id] || { cpu: null, memory: null }
 
                   return (
                     <div
@@ -799,22 +895,18 @@ export default function ServerStore() {
                           <p className="text-sm text-gray-400 mb-3">{server.specs}</p>
 
                           {/* Server Info Grid */}
-                          <div className="grid grid-cols-4 gap-3 mb-4">
+                          <div className="grid grid-cols-3 gap-3 mb-4">
                             <div>
                               <p className="text-xs text-gray-500">CPU Cores</p>
-                              <p className="text-lg font-bold text-neon-yellow">{systemInfo.cpu_cores || 0}</p>
+                              <p className="text-lg font-bold text-neon-yellow">{Number(server.cpu_cores) || 0}</p>
                             </div>
                             <div>
                               <p className="text-xs text-gray-500">RAM</p>
-                              <p className="text-lg font-bold text-neon-cyan">{systemInfo.ram_gb}GB</p>
+                              <p className="text-lg font-bold text-neon-cyan">{Number(server.ram_gb) || 0}GB</p>
                             </div>
                             <div>
                               <p className="text-xs text-gray-500">OS</p>
-                              <p className="text-lg font-bold text-neon-purple">{systemInfo.os_type}</p>
-                            </div>
-                            <div>
-                              <p className="text-xs text-gray-500">Subscribers</p>
-                              <p className="text-lg font-bold text-neon-green">{server.subscribers_count}</p>
+                              <p className="text-lg font-bold text-neon-purple">{server.os_type || 'Unknown'}</p>
                             </div>
                           </div>
                         </div>
@@ -824,6 +916,43 @@ export default function ServerStore() {
                           <p className="text-xs text-gray-500 mb-1">Monthly Price</p>
                           <p className="text-xl font-bold text-neon-yellow">${(server.price_per_hour * 730).toFixed(2)}</p>
                         </div>
+                      </div>
+
+                      {/* Server Metrics Display */}
+                      <div className="bg-dark-900/50 rounded-lg p-4 mb-4 border border-neon-cyan/20 space-y-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="text-xs text-gray-400">CPU Usage</p>
+                            <span className="text-sm font-bold text-neon-yellow">
+                              {serverMetrics.cpu !== null ? `${serverMetrics.cpu.toFixed(1)}%` : 'N/A'}
+                            </span>
+                          </div>
+                          <div className="w-full bg-dark-800 rounded-full h-1.5">
+                            <div
+                              className="bg-neon-yellow h-1.5 rounded-full transition-all"
+                              style={{ width: `${serverMetrics.cpu || 0}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <p className="text-xs text-gray-400">Memory Usage</p>
+                            <span className="text-sm font-bold text-neon-cyan">
+                              {serverMetrics.memory !== null ? `${serverMetrics.memory.toFixed(1)}%` : 'N/A'}
+                            </span>
+                          </div>
+                          <div className="w-full bg-dark-800 rounded-full h-1.5">
+                            <div
+                              className="bg-neon-cyan h-1.5 rounded-full transition-all"
+                              style={{ width: `${serverMetrics.memory || 0}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mb-4">
+                        <p className="text-xs text-gray-500">Subscribers</p>
+                        <p className="text-sm font-semibold text-neon-green">{server.subscribers_count || 0}</p>
                       </div>
 
                       {/* Request Badge */}
@@ -974,7 +1103,7 @@ export default function ServerStore() {
                     />
                   </div>
 
-                  {loadingSystemInfo ? (
+                  {showEditHardwareLoading ? (
                     <div className="text-center py-4">
                       <p className="text-gray-400">Loading system information...</p>
                     </div>
@@ -982,15 +1111,15 @@ export default function ServerStore() {
                     <div className="grid grid-cols-3 gap-4 bg-dark-900 p-4 rounded-lg border border-gray-700">
                       <div>
                         <label className="block text-xs text-gray-500 mb-2">CPU Cores</label>
-                        <p className="text-xl font-bold text-neon-yellow">{systemInfo.cpu_cores}</p>
+                        <p className="text-xl font-bold text-neon-yellow">{editHardwareInfo.cpu_cores}</p>
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-2">RAM (GB)</label>
-                        <p className="text-xl font-bold text-neon-cyan">{systemInfo.ram_gb}</p>
+                        <p className="text-xl font-bold text-neon-cyan">{editHardwareInfo.ram_gb}</p>
                       </div>
                       <div>
                         <label className="block text-xs text-gray-500 mb-2">OS Type</label>
-                        <p className="text-xl font-bold text-neon-purple">{systemInfo.os_type}</p>
+                        <p className="text-xl font-bold text-neon-purple">{editHardwareInfo.os_type}</p>
                       </div>
                     </div>
                   )}

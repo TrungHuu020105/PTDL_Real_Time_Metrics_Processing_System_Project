@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from app.models import Metric, Alert, User, Device, UserDevicePermission, IoTDevice, ServerSubscriptionRequest
+from app.models import Metric, Alert, User, Device, UserDevicePermission, IoTDevice, ServerSubscriptionRequest, ServerSubscription
 from app.schemas import MetricCreate, AlertCreate, UserRegister, DeviceCreate
 
 
@@ -425,6 +425,10 @@ def get_user_accessible_sources(db: Session, user_id: int) -> List[str]:
         # Admins see all active IoT device sources
         iot_devices = db.query(IoTDevice).filter(IoTDevice.is_active == True).all()
         sources.extend([d.source for d in iot_devices])
+
+        # Admins also see any source that already has metrics (covers remote agents)
+        metric_sources = db.query(Metric.source).distinct().all()
+        sources.extend([row[0] for row in metric_sources if row and row[0]])
     else:
         # Regular users see:
         # 1. Devices they have permission for (from UserDevicePermission)
@@ -437,26 +441,50 @@ def get_user_accessible_sources(db: Session, user_id: int) -> List[str]:
             IoTDevice.is_active == True
         ).all()
         sources.extend([d.source for d in iot_devices])
-    
-    return sources
+
+        # 3. Sources for servers they are subscribed to (server_{id} convention)
+        subscriptions = db.query(ServerSubscription).filter(
+            ServerSubscription.user_id == user_id
+        ).all()
+        for sub in subscriptions:
+            sources.append(f"server_{sub.server_id}")
+            if sub.server_id == 1:
+                sources.append("system_monitor")
+
+    # Keep order while removing duplicates
+    return list(dict.fromkeys(sources))
 
 
-def get_latest_metrics_for_user(db: Session, user_id: int) -> tuple:
+def get_latest_metrics_for_user(db: Session, user_id: int, source: Optional[str] = None) -> tuple:
     """Get latest values for each metric type, filtered by user's accessible devices"""
     accessible_sources = get_user_accessible_sources(db, user_id)
     
     if not accessible_sources:
         return None, None
     
-    latest_cpu = db.query(Metric).filter(
-        Metric.metric_type == "cpu",
-        Metric.source.in_(accessible_sources)
-    ).order_by(Metric.timestamp.desc()).first()
-    
-    latest_memory = db.query(Metric).filter(
-        Metric.metric_type == "memory",
-        Metric.source.in_(accessible_sources)
-    ).order_by(Metric.timestamp.desc()).first()
+    if source:
+        if source not in accessible_sources:
+            return None, None
+
+        latest_cpu = db.query(Metric).filter(
+            Metric.metric_type == "cpu",
+            Metric.source == source
+        ).order_by(Metric.timestamp.desc()).first()
+
+        latest_memory = db.query(Metric).filter(
+            Metric.metric_type == "memory",
+            Metric.source == source
+        ).order_by(Metric.timestamp.desc()).first()
+    else:
+        latest_cpu = db.query(Metric).filter(
+            Metric.metric_type == "cpu",
+            Metric.source.in_(accessible_sources)
+        ).order_by(Metric.timestamp.desc()).first()
+
+        latest_memory = db.query(Metric).filter(
+            Metric.metric_type == "memory",
+            Metric.source.in_(accessible_sources)
+        ).order_by(Metric.timestamp.desc()).first()
     
     return latest_cpu, latest_memory
 
@@ -465,7 +493,8 @@ def get_metrics_history_for_user(
     db: Session,
     user_id: int,
     metric_type: str,
-    minutes: int = 5
+    minutes: int = 5,
+    source: Optional[str] = None
 ) -> List[Metric]:
     """Get historical metrics for a specific type, filtered by user's accessible devices"""
     accessible_sources = get_user_accessible_sources(db, user_id)
@@ -476,11 +505,21 @@ def get_metrics_history_for_user(
     vietnam_tz = timezone(timedelta(hours=7))
     time_threshold = datetime.now(vietnam_tz) - timedelta(minutes=minutes)
     
-    metrics = db.query(Metric).filter(
-        Metric.metric_type == metric_type,
-        Metric.source.in_(accessible_sources),
-        Metric.timestamp >= time_threshold
-    ).order_by(Metric.timestamp.asc()).all()
+    if source:
+        if source not in accessible_sources:
+            return []
+
+        metrics = db.query(Metric).filter(
+            Metric.metric_type == metric_type,
+            Metric.source == source,
+            Metric.timestamp >= time_threshold
+        ).order_by(Metric.timestamp.asc()).all()
+    else:
+        metrics = db.query(Metric).filter(
+            Metric.metric_type == metric_type,
+            Metric.source.in_(accessible_sources),
+            Metric.timestamp >= time_threshold
+        ).order_by(Metric.timestamp.asc()).all()
     
     return metrics
 

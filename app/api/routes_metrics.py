@@ -1,6 +1,6 @@
 """API routes for metrics endpoints"""
 
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -74,6 +74,7 @@ async def create_metrics_bulk(
 
 @router.get("/metrics/latest", response_model=LatestMetricsResponse)
 async def get_latest_metrics(
+    source: Optional[str] = Query(None, description="Optional source filter, e.g. system_monitor or server_2"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -85,7 +86,7 @@ async def get_latest_metrics(
     """
     from datetime import datetime, timezone, timedelta
     
-    cpu_metric, memory_metric = crud.get_latest_metrics_for_user(db, current_user.id)
+    cpu_metric, memory_metric = crud.get_latest_metrics_for_user(db, current_user.id, source=source)
     vietnam_tz = timezone(timedelta(hours=7))
     
     return {
@@ -100,6 +101,8 @@ async def get_latest_metrics(
 async def get_metrics_history(
     metric_type: str = Query(..., description="Type of metric: cpu, memory, temperature, humidity, soil_moisture, light_intensity, pressure"),
     minutes: int = Query(5, ge=1, le=1440, description="Time range in minutes (1-1440)"),
+    source: Optional[str] = Query(None, description="Optional source filter, e.g. system_monitor or server_2"),
+    server_id: Optional[int] = Query(None, ge=1, description="Optional server ID. If provided, source will default to server_{server_id}"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -126,7 +129,18 @@ async def get_metrics_history(
             detail=f"Invalid metric_type. Must be one of {allowed_types}"
         )
 
-    metrics = crud.get_metrics_history_for_user(db, current_user.id, metric_type, minutes)
+    effective_source = source
+    if server_id is not None and not effective_source:
+        # Keep localhost compatibility with existing collector source
+        effective_source = "system_monitor" if server_id == 1 else f"server_{server_id}"
+
+    metrics = crud.get_metrics_history_for_user(
+        db,
+        current_user.id,
+        metric_type,
+        minutes,
+        source=effective_source
+    )
 
     return {
         "metric_type": metric_type,

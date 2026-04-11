@@ -279,28 +279,36 @@ async def get_device_users(device_id: int, admin: User = Depends(verify_admin), 
 
 @router.get("/iot-devices")
 async def get_all_iot_devices(admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
-    """Admin: Get all user IoT devices with owner info"""
-    devices = db.query(IoTDevice).all()
+    """Admin: Get device COUNT per user (NOT device details)"""
+    from sqlalchemy import func
     
-    # Fetch user info for each device
+    # Get device count grouped by user
+    device_counts = db.query(
+        User.id,
+        User.username,
+        User.email,
+        func.count(IoTDevice.id).label('device_count')
+    ).outerjoin(IoTDevice, User.id == IoTDevice.user_id).group_by(
+        User.id,
+        User.username,
+        User.email
+    ).order_by(func.count(IoTDevice.id).desc()).all()
+    
     result = []
-    for d in devices:
-        owner = db.query(User).filter(User.id == d.user_id).first()
+    total_devices = 0
+    for user_id, username, email, count in device_counts:
         result.append({
-            "id": d.id,
-            "user_id": d.user_id,
-            "username": owner.username if owner else "Unknown",
-            "name": d.name,
-            "device_type": d.device_type,
-            "source": d.source,
-            "location": d.location,
-            "is_active": d.is_active,
-            "created_at": d.created_at
+            "user_id": user_id,
+            "username": username,
+            "email": email,
+            "device_count": count or 0
         })
+        total_devices += (count or 0)
     
     return {
-        "devices": result,
-        "count": len(result)
+        "users_summary": result,
+        "total_devices": total_devices,
+        "total_users": len(result)
     }
 
 

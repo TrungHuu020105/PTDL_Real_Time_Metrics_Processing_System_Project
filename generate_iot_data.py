@@ -1,19 +1,27 @@
 """
-Script to generate fake IoT sensor data and save to database.
-Can run once or continuously (infinite loop).
+Production-grade IoT Sensor Data Generator
+
+Features:
+- Mỗi sensor sinh đúng 1 metric (1-to-1 mapping)
+- Stateful random walk (dữ liệu mượt)
+- Smart storage filtering (threshold + time-based)
+- Bulk insert optimization
+- Detailed logging per batch
 
 Usage:
-    python generate_iot_data.py                          # Run once
-    python generate_iot_data.py --continuous             # Continuous mode (2s interval)
-    python generate_iot_data.py --continuous --interval 5  # Continuous with 5s interval
+    python generate_iot_data.py                      # Run once (1 batch = 5 metrics)
+    python generate_iot_data.py --continuous        # Continuous (5s interval)
+    python generate_iot_data.py --continuous --interval 10  # Custom interval
 """
 
-import random
 import sys
 import time
+import math
+import random
 from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple, List
 
-# Add app directory to path
 sys.path.insert(0, '.')
 
 from app.schemas import MetricCreate, MetricBulkCreate
@@ -21,409 +29,468 @@ from app.crud import create_metrics_bulk
 from app.database import SessionLocal, init_db
 
 
-def generate_iot_data(count: int = 200) -> dict:
-    """
-    Generate realistic IoT sensor data.
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+@dataclass
+class SensorConfig:
+    """Configuration for each sensor"""
+    metric_type: str
+    source: str
+    min_value: float
+    max_value: float
+    step_size: float
+    save_threshold: float
+    max_save_interval: int
+    unit: str
+    trend_enabled: bool = False
+    trend_amplitude: float = 0.0
+
+
+# Sensor configurations (1 sensor = 1 metric type)
+SENSORS = [
+    SensorConfig(
+        metric_type="temperature",
+        source="sensor_1",
+        min_value=15.0,
+        max_value=35.0,
+        step_size=0.5,          # Increased step size for better variation
+        save_threshold=0.5,
+        max_save_interval=300,
+        unit="°C",
+        trend_enabled=True,
+        trend_amplitude=3.0     # Reduced from 5.0 to avoid clamping at max
+    ),
+    SensorConfig(
+        metric_type="humidity",
+        source="sensor_2",
+        min_value=30.0,
+        max_value=90.0,
+        step_size=1.5,          # Increased step size
+        save_threshold=2.0,
+        max_save_interval=300,
+        unit="%",
+        trend_enabled=True,
+        trend_amplitude=5.0     # Reduced from 10.0 to avoid clamping
+    ),
+    SensorConfig(
+        metric_type="soil_moisture",
+        source="sensor_3",
+        min_value=0.0,
+        max_value=100.0,
+        step_size=3.0,          # Increased from 2.0
+        save_threshold=3.0,
+        max_save_interval=600,
+        unit="%",
+        trend_enabled=False,
+        trend_amplitude=0.0
+    ),
+    SensorConfig(
+        metric_type="light_intensity",
+        source="sensor_4",
+        min_value=200.0,        # Changed from 0.0 (avoid constant 0)
+        max_value=900.0,        # Changed from 1000.0 (avoid constant max)
+        step_size=80.0,         # Increased from 50.0
+        save_threshold=100.0,
+        max_save_interval=300,
+        unit="lux",
+        trend_enabled=True,
+        trend_amplitude=200.0   # Reduced from 500.0 significantly
+    ),
+    SensorConfig(
+        metric_type="pressure",
+        source="sensor_5",
+        min_value=900.0,
+        max_value=1100.0,
+        step_size=0.5,
+        save_threshold=1.0,
+        max_save_interval=600,
+        unit="hPa",
+        trend_enabled=False,
+        trend_amplitude=0.0
+    ),
+]
+
+
+# ============================================================================
+# STATE MANAGEMENT
+# ============================================================================
+
+@dataclass
+class SensorState:
+    """State for a single sensor"""
+    metric_type: str
+    source: str
+    last_generated_value: float
+    last_saved_value: float
+    last_saved_timestamp: datetime
+    generated_count: int = 0
+    saved_count: int = 0
+    dropped_count: int = 0
+
+
+class StateManager:
+    """Manage state for all sensors"""
     
-    Args:
-        count: Number of IoT metrics to generate (default: 200)
+    def __init__(self):
+        self.states: Dict[str, SensorState] = {}
     
-    Returns:
-        Dictionary with generation stats
-    """
-    
-    # Initialize database
-    init_db()
-    
-    # IoT metric types with their realistic ranges
-    iot_metrics = {
-        "temperature": {
-            "unit": "°C",
-            "min": 15,
-            "max": 35,
-            "description": "Temperature"
-        },
-        "humidity": {
-            "unit": "%",
-            "min": 30,
-            "max": 90,
-            "description": "Humidity"
-        },
-        "soil_moisture": {
-            "unit": "%",
-            "min": 0,
-            "max": 100,
-            "description": "Soil Moisture"
-        },
-        "light_intensity": {
-            "unit": "lux",
-            "min": 0,
-            "max": 1000,
-            "description": "Light Intensity"
-        },
-        "pressure": {
-            "unit": "hPa",
-            "min": 900,
-            "max": 1100,
-            "description": "Atmospheric Pressure"
-        }
-    }
-    
-    # Sensor sources
-    sensor_sources = [f"sensor_{i}" for i in range(1, 5)]  # sensor_1, sensor_2, sensor_3, sensor_4
-    
-    metrics_to_create = []
-    stats = {
-        "total": 0,
-        "by_type": {},
-        "by_source": {}
-    }
-    
-    print("=" * 70)
-    print("🚀 GENERATING FAKE IoT SENSOR DATA")
-    print("=" * 70)
-    print(f"📊 Generating {count} IoT metrics...")
-    print(f"📡 Sensors: {sensor_sources}")
-    print(f"📈 Metric types: {list(iot_metrics.keys())}")
-    print()
-    
-    # Generate sample data
-    for i in range(count):
-        # Random metric type
-        metric_type = random.choice(list(iot_metrics.keys()))
-        metric_info = iot_metrics[metric_type]
-        
-        # Generate realistic value
-        value = round(random.uniform(metric_info["min"], metric_info["max"]), 2)
-        
-        # Random source
-        source = random.choice(sensor_sources)
-        
-        # No timestamp - will use current time
-        metric = MetricCreate(
-            metric_type=metric_type,
-            value=value,
-            source=source,
-            timestamp=None
+    def initialize(self, config: SensorConfig, initial_value: float):
+        """Initialize sensor with random initial value"""
+        now = datetime.now(timezone(timedelta(hours=7)))
+        self.states[config.source] = SensorState(
+            metric_type=config.metric_type,
+            source=config.source,
+            last_generated_value=initial_value,
+            last_saved_value=initial_value,
+            last_saved_timestamp=now
         )
-        metrics_to_create.append(metric)
-        
-        # Track stats
-        stats["total"] += 1
-        stats["by_type"][metric_type] = stats["by_type"].get(metric_type, 0) + 1
-        stats["by_source"][source] = stats["by_source"].get(source, 0) + 1
     
-    # Create bulk record
-    bulk_data = MetricBulkCreate(metrics=metrics_to_create)
+    def get_state(self, source: str) -> Optional[SensorState]:
+        """Get state for a sensor"""
+        return self.states.get(source)
     
-    # Get database session and save
-    db = SessionLocal()
-    try:
-        created_metrics = create_metrics_bulk(db, bulk_data.metrics)
-        print("✅ SUCCESS! Data saved to database.")
-        print(f"📥 Created {len(created_metrics)} IoT metrics")
-        print()
-        
-        # Print statistics
-        print("📊 STATISTICS:")
-        print("-" * 70)
-        print(f"  Total metrics created: {stats['total']}")
-        print()
-        
-        print("  By Metric Type:")
-        for metric_type, count in sorted(stats["by_type"].items()):
-            unit = iot_metrics[metric_type]["unit"]
-            percentage = (count / stats["total"]) * 100
-            print(f"    • {metric_type:20} {count:3} records ({percentage:5.1f}%) [{unit}]")
-        print()
-        
-        print("  By Sensor Source:")
-        for source, count in sorted(stats["by_source"].items()):
-            percentage = (count / stats["total"]) * 100
-            print(f"    • {source:20} {count:3} records ({percentage:5.1f}%)")
-        print()
-        
-        # Print sample data
-        print("📋 SAMPLE DATA (First 5 records):")
-        print("-" * 70)
-        for i, metric in enumerate(created_metrics[:5], 1):
-            unit = iot_metrics[metric.metric_type]["unit"]
-            print(f"  {i}. {metric.metric_type:20} = {metric.value:8.2f} {unit:5} | {metric.source:10} | {metric.timestamp}")
-        print()
-        
-        print("=" * 70)
-        print("🎉 Ready to use! Test with:")
-        print("   curl \"http://localhost:8000/api/metrics/history?metric_type=temperature&minutes=60\"")
-        print("=" * 70)
-        
-        return {
-            "success": True,
-            "created": len(created_metrics),
-            "stats": stats
-        }
-        
-    except Exception as e:
-        print(f"❌ ERROR: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
-    finally:
-        db.close()
+    def update_generated(self, source: str, value: float):
+        """Update after generation"""
+        state = self.get_state(source)
+        if state:
+            state.last_generated_value = value
+            state.generated_count += 1
+    
+    def update_saved(self, source: str, value: float):
+        """Update after saving"""
+        state = self.get_state(source)
+        if state:
+            state.last_saved_value = value
+            state.last_saved_timestamp = datetime.now(timezone(timedelta(hours=7)))
+            state.saved_count += 1
+    
+    def mark_dropped(self, source: str):
+        """Mark when data is dropped"""
+        state = self.get_state(source)
+        if state:
+            state.dropped_count += 1
+    
+    def get_all_states(self) -> List[SensorState]:
+        """Get all states"""
+        return list(self.states.values())
 
 
-def generate_iot_data_spread_time(count: int = 200, hours: int = 24) -> dict:
+# ============================================================================
+# DATA GENERATION
+# ============================================================================
+
+def get_time_trend(config: SensorConfig) -> float:
     """
-    Generate IoT data spread over a time range.
-    
-    Args:
-        count: Number of metrics to generate
-        hours: Spread data over how many hours (default: 24)
-    
-    Returns:
-        Dictionary with generation stats
+    Calculate time-based trend (sine wave for daily cycle).
+    Peak at 14:00, minimum at 02:00
     """
+    if not config.trend_enabled:
+        return 0.0
     
-    # Initialize database
-    init_db()
+    now = datetime.now(timezone(timedelta(hours=7)))
+    hour = now.hour + now.minute / 60.0
+    phase = (hour - 14) / 24.0 * (2 * math.pi)
+    trend = config.trend_amplitude * math.sin(phase)
     
-    iot_metrics = {
-        "temperature": {"min": 15, "max": 35},
-        "humidity": {"min": 30, "max": 90},
-        "soil_moisture": {"min": 0, "max": 100},
-        "light_intensity": {"min": 0, "max": 1000},
-        "pressure": {"min": 900, "max": 1100}
-    }
-    
-    sensor_sources = [f"sensor_{i}" for i in range(1, 5)]
-    metrics_to_create = []
-    
-    print("=" * 70)
-    print("🚀 GENERATING FAKE IoT SENSOR DATA (Time-Spread)")
-    print("=" * 70)
-    print(f"📊 Generating {count} IoT metrics spread over {hours} hours...")
-    print()
-    
-    vietnam_tz = timezone(timedelta(hours=7))
-    now = datetime.now(vietnam_tz)
-    
-    # Generate sample data
-    for i in range(count):
-        metric_type = random.choice(list(iot_metrics.keys()))
-        metric_info = iot_metrics[metric_type]
-        value = round(random.uniform(metric_info["min"], metric_info["max"]), 2)
-        source = random.choice(sensor_sources)
-        
-        # Spread timestamps over the specified hours
-        seconds_ago = random.randint(0, hours * 3600)
-        timestamp = now - timedelta(seconds=seconds_ago)
-        
-        metric = MetricCreate(
-            metric_type=metric_type,
-            value=value,
-            source=source,
-            timestamp=timestamp
-        )
-        metrics_to_create.append(metric)
-    
-    # Create bulk record
-    bulk_data = MetricBulkCreate(metrics=metrics_to_create)
-    
-    # Get database session and save
-    db = SessionLocal()
-    try:
-        created_metrics = create_metrics_bulk(db, bulk_data.metrics)
-        print(f"✅ SUCCESS! Created {len(created_metrics)} IoT metrics")
-        print()
-        print("=" * 70)
-        print("🎉 Data ready! Test with:")
-        print(f"   curl \"http://localhost:8000/api/metrics/history?metric_type=temperature&minutes={hours*60}\"")
-        print("=" * 70)
-        
-        return {
-            "success": True,
-            "created": len(created_metrics)
-        }
-        
-    except Exception as e:
-        print(f"❌ ERROR: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
-    finally:
-        db.close()
+    return trend
 
 
-def generate_iot_data_continuous(count_per_batch: int = 50, interval: int = 2):
-    """
-    Generate fake IoT sensor data continuously (infinite loop).
+def clamp(value: float, config: SensorConfig) -> float:
+    """Clamp value to min/max range"""
+    return max(config.min_value, min(config.max_value, value))
+
+
+def generate_value(config: SensorConfig, state: SensorState) -> float:
+    """Generate realistic sensor value using random walk with boundary reflection"""
+    # Random walk with direction bias to avoid getting stuck at boundaries
+    random_change = random.uniform(-config.step_size, config.step_size)
     
-    Args:
-        count_per_batch: Number of metrics to generate per batch (default: 50)
-        interval: Wait time between batches in seconds (default: 2)
-    """
+    # Check if we're too close to boundaries - if so, force bounce back
+    range_size = config.max_value - config.min_value
+    current_pos = state.last_generated_value
+    distance_to_max = config.max_value - current_pos
+    distance_to_min = current_pos - config.min_value
     
-    # Initialize database
-    init_db()
+    # If too close to max, force STRONG negative to bounce back
+    if distance_to_max < range_size * 0.20:  # Within 20% of max
+        random_change = random.uniform(-config.step_size * 2.0, -config.step_size * 0.8)
+    # If too close to min, force STRONG positive to bounce back
+    elif distance_to_min < range_size * 0.20:  # Within 20% of min
+        random_change = random.uniform(config.step_size * 0.8, config.step_size * 2.0)
     
-    # IoT metric types with their realistic ranges
-    iot_metrics = {
-        "temperature": {
-            "unit": "°C",
-            "min": 15,
-            "max": 35,
-            "description": "Temperature"
-        },
-        "humidity": {
-            "unit": "%",
-            "min": 30,
-            "max": 90,
-            "description": "Humidity"
-        },
-        "soil_moisture": {
-            "unit": "%",
-            "min": 0,
-            "max": 100,
-            "description": "Soil Moisture"
-        },
-        "light_intensity": {
-            "unit": "lux",
-            "min": 0,
-            "max": 1000,
-            "description": "Light Intensity"
-        },
-        "pressure": {
-            "unit": "hPa",
-            "min": 900,
-            "max": 1100,
-            "description": "Atmospheric Pressure"
-        }
-    }
+    # Time trend (but disable when near boundaries to allow escape)
+    if distance_to_max > range_size * 0.25 and distance_to_min > range_size * 0.25:
+        trend = get_time_trend(config)
+    else:
+        trend = 0.0  # Disable trend when near boundary to allow escape
     
-    # Sensor sources
-    sensor_sources = [f"sensor_{i}" for i in range(1, 5)]
+    # New value
+    new_value = state.last_generated_value + random_change + trend
     
-    print("=" * 70)
-    print("🚀 CONTINUOUS IoT DATA GENERATOR (Fake Sensor Mode)")
-    print("=" * 70)
-    print(f"📊 Batch size: {count_per_batch} metrics per batch")
-    print(f"⏱️  Interval: {interval} seconds")
-    print(f"📡 Sensors: {sensor_sources}")
-    print(f"📈 Metric types: {list(iot_metrics.keys())}")
-    print()
-    print("⚠️  Press Ctrl+C to stop\n")
+    # Clamp to limits
+    new_value = clamp(new_value, config)
     
-    batch_count = 0
-    total_created = 0
+    return round(new_value, 2)
+
+
+def should_save(config: SensorConfig, state: SensorState, new_value: float) -> Tuple[bool, str]:
+    """Decide if should save"""
+    # Check 1: Threshold-based
+    value_change = abs(new_value - state.last_saved_value)
+    if value_change >= config.save_threshold:
+        return True, f"change={value_change:.2f}>={config.save_threshold}"
     
-    try:
-        while True:
-            batch_count += 1
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # Check 2: Time-based fallback
+    now = datetime.now(timezone(timedelta(hours=7)))
+    time_since_save = (now - state.last_saved_timestamp).total_seconds()
+    
+    if time_since_save >= config.max_save_interval:
+        return True, f"time={time_since_save:.0f}s>={config.max_save_interval}s"
+    
+    return False, f"filtered(Δ={value_change:.2f}, t={time_since_save:.0f}s)"
+
+
+# ============================================================================
+# MAIN GENERATOR
+# ============================================================================
+
+class IoTDataGenerator:
+    """Main IoT data generator"""
+    
+    def __init__(self):
+        self.state_manager = StateManager()
+        self.initialized = False
+    
+    def initialize(self):
+        """Initialize all sensors"""
+        init_db()
+        
+        for config in SENSORS:
+            initial_value = random.uniform(config.min_value, config.max_value)
+            initial_value = round(initial_value, 2)
+            self.state_manager.initialize(config, initial_value)
+        
+        self.initialized = True
+    
+    def run_once(self, save_to_db: bool = True):
+        """
+        Generate one batch (1 metric per sensor = 5 metrics)
+        
+        Args:
+            save_to_db: If True, save to database. If False, return metrics without saving.
+        
+        Returns:
+            dict: {"metrics": [...batch details...]} when save_to_db=False
+            None: when save_to_db=True (regular behavior)
+        
+        IMPORTANT: When save_to_db=False (streaming mode):
+        - Return ALL generated metrics (no filtering)
+        - Frontend receives 100% of data for smooth realtime display
+        - Database only saves "important" data (filtered by threshold)
+        """
+        if not self.initialized:
+            self.initialize()
+        
+        now = datetime.now(timezone(timedelta(hours=7)))
+        timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
+        
+        metrics_to_save = []
+        batch_log = []
+        all_metrics = []  # For return when save_to_db=False (ALL data, no filtering)
+        
+        # Generate 1 metric per sensor
+        for config in SENSORS:
+            state = self.state_manager.get_state(config.source)
+            if not state:
+                continue
             
-            metrics_to_create = []
-            batch_stats = {
-                "by_type": {},
-                "by_source": {}
+            # Generate value
+            value = generate_value(config, state)
+            self.state_manager.update_generated(config.source, value)
+            
+            # Decide save or drop (for DB filtering)
+            should_save_flag, reason = should_save(config, state, value)
+            
+            if should_save_flag:
+                metrics_to_save.append((config.metric_type, config.source, value))
+                self.state_manager.update_saved(config.source, value)
+                status = "✅ SAVE"
+            else:
+                self.state_manager.mark_dropped(config.source)
+                status = "⏭️  SKIP"
+            
+            batch_log.append({
+                "metric_type": config.metric_type,
+                "source": config.source,
+                "value": value,
+                "status": status,
+                "reason": reason
+            })
+            
+            # Add to all_metrics for streaming (includes unit)
+            # IMPORTANT: Include ALL metrics (even filtered ones) for realtime display
+            all_metrics.append({
+                "metric_type": config.metric_type,
+                "source": config.source,
+                "value": round(value, 2),
+                "unit": config.unit,
+                "timestamp": timestamp_str,
+                "saved": should_save_flag,  # Flag for DB filtering decision
+                "reason": reason
+            })
+        
+        # If streaming mode (no DB save), return ALL metrics
+        if not save_to_db:
+            return {
+                "metrics": all_metrics,  # ALL data for frontend
+                "timestamp": timestamp_str,
+                "generated": len(batch_log),
+                "saved": len(metrics_to_save),
+                "dropped": len(batch_log) - len(metrics_to_save)
             }
-            
-            # Generate batch
-            for i in range(count_per_batch):
-                metric_type = random.choice(list(iot_metrics.keys()))
-                metric_info = iot_metrics[metric_type]
-                value = round(random.uniform(metric_info["min"], metric_info["max"]), 2)
-                source = random.choice(sensor_sources)
-                
-                metric = MetricCreate(
+        
+        # Write to database (normal mode)
+        saved_count = self._write_batch(metrics_to_save)
+        
+        # Print batch log
+        self._print_batch_log(timestamp_str, batch_log, len(metrics_to_save))
+    
+    def _write_batch(self, metrics_to_save: List[Tuple[str, str, float]]) -> int:
+        """Write batch to database"""
+        if not metrics_to_save:
+            return 0
+        
+        db = SessionLocal()
+        try:
+            metric_creates = [
+                MetricCreate(
                     metric_type=metric_type,
                     value=value,
                     source=source,
                     timestamp=None
                 )
-                metrics_to_create.append(metric)
-                
-                # Track stats
-                batch_stats["by_type"][metric_type] = batch_stats["by_type"].get(metric_type, 0) + 1
-                batch_stats["by_source"][source] = batch_stats["by_source"].get(source, 0) + 1
+                for metric_type, source, value in metrics_to_save
+            ]
             
-            # Create bulk record
-            bulk_data = MetricBulkCreate(metrics=metrics_to_create)
+            bulk_data = MetricBulkCreate(metrics=metric_creates)
+            created = create_metrics_bulk(db, bulk_data.metrics)
             
-            # Save to database
-            db = SessionLocal()
-            try:
-                created_metrics = create_metrics_bulk(db, bulk_data.metrics)
-                total_created += len(created_metrics)
-                
-                # Print progress
-                print(f"[{timestamp}] Batch #{batch_count} ✅ {len(created_metrics)} metrics created | Total: {total_created}")
-                
-                # Detailed stats
-                type_str = " | ".join([f"{t}:{''.join(chr(0x2588) for _ in range(c))}" for t, c in batch_stats["by_type"].items()])
-                source_str = " | ".join([f"{s}:{c}" for s, c in batch_stats["by_source"].items()])
-                print(f"  Types: {type_str}")
-                print(f"  Sources: {source_str}\n")
-                
-            except Exception as e:
-                print(f"[{timestamp}] Batch #{batch_count} ❌ ERROR: {str(e)}\n")
-            finally:
-                db.close()
-            
-            # Wait before next batch
-            time.sleep(interval)
+            return len(created)
+        except Exception as e:
+            print(f"❌ DB Error: {e}")
+            return 0
+        finally:
+            db.close()
     
-    except KeyboardInterrupt:
-        print()
-        print("=" * 70)
-        print(f"🛑 STOPPED BY USER")
-        print("=" * 70)
-        print(f"📊 Total batches: {batch_count}")
-        print(f"📥 Total metrics created: {total_created}")
-        print(f"⏱️  Runtime: ~{batch_count * interval} seconds")
-        print(f"⚡ Average: {total_created // max(batch_count, 1)} metrics per batch")
-        print("=" * 70)
+    def _print_batch_log(self, timestamp_str: str, batch_log: list, saved_count: int):
+        """Print batch statistics"""
+        total = len(batch_log)
+        dropped = total - saved_count
+        
+        print(f"\n[{timestamp_str}] Generated: {total}, Saved: {saved_count}, Dropped: {dropped}")
+        print("-" * 120)
+        
+        for log in batch_log:
+            print(
+                f"  {log['status']} | {log['metric_type']:20} ({log['source']:10}) = "
+                f"{log['value']:8.2f} | {log['reason']}"
+            )
+        
+        print("")
+    
+    def run_continuous(self, interval: int = 5):
+        """Run continuously"""
+        if not self.initialized:
+            self.initialize()
+        
+        print("\n" + "=" * 120)
+        print("🚀 IoT DATA GENERATOR - CONTINUOUS MODE")
+        print("=" * 120)
+        print(f"📊 Sensors: {len(SENSORS)}")
+        print(f"⏰ Interval: {interval}s")
+        print("=" * 120)
+        
+        try:
+            while True:
+                self.run_once()
+                time.sleep(interval)
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Interrupted by user")
+            self._print_summary()
+    
+    def _print_summary(self):
+        """Print final summary"""
+        print("\n" + "=" * 120)
+        print("📋 FINAL SUMMARY")
+        print("=" * 120)
+        
+        total_generated = 0
+        total_saved = 0
+        total_dropped = 0
+        
+        for state in self.state_manager.get_all_states():
+            total_generated += state.generated_count
+            total_saved += state.saved_count
+            total_dropped += state.dropped_count
+            
+            pct = (state.saved_count / state.generated_count * 100) if state.generated_count > 0 else 0
+            print(
+                f"  {state.metric_type:20} ({state.source:10}) | "
+                f"Gen: {state.generated_count:4} | "
+                f"Saved: {state.saved_count:4} | "
+                f"Dropped: {state.dropped_count:4} | "
+                f"SavePct: {pct:5.1f}%"
+            )
+        
+        if total_generated > 0:
+            save_pct = (total_saved / total_generated * 100)
+            print(f"\n  Overall: Generated={total_generated}, Saved={total_saved}, "
+                  f"Dropped={total_dropped}, SavePct={save_pct:.1f}%")
+        
+        print("=" * 120 + "\n")
 
 
-if __name__ == "__main__":
+# ============================================================================
+# ENTRY POINT & CLI
+# ============================================================================
+
+def main():
+    """Main entry point"""
     import argparse
     
-    parser = argparse.ArgumentParser(description="Generate fake IoT sensor data (once or continuously)")
-    parser.add_argument(
-        "--count",
-        type=int,
-        default=200,
-        help="Number of metrics to generate per batch (default: 200 for once, 50 for continuous)"
-    )
-    parser.add_argument(
-        "--spread-hours",
-        type=int,
-        default=None,
-        help="Spread data over N hours (optional, only for one-time generation)"
+    parser = argparse.ArgumentParser(
+        description="Production-grade IoT Sensor Data Generator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python generate_iot_data.py                      # Generate 1 batch (5 metrics)
+  python generate_iot_data.py --continuous         # Continuous (5s interval)
+  python generate_iot_data.py --continuous --interval 10  # Custom interval
+        """
     )
     parser.add_argument(
         "--continuous",
         action="store_true",
-        help="Run in continuous mode (infinite loop)"
+        help="Run in continuous mode (default: False)"
     )
     parser.add_argument(
         "--interval",
         type=int,
-        default=2,
-        help="Interval in seconds between batches for continuous mode (default: 2)"
+        default=5,
+        help="Interval in seconds (default: 5)"
     )
     
     args = parser.parse_args()
     
+    generator = IoTDataGenerator()
+    
     if args.continuous:
-        # Continuous mode
-        count_per_batch = args.count if args.count != 200 else 50  # Use custom count or default to 50
-        generate_iot_data_continuous(count_per_batch=count_per_batch, interval=args.interval)
-    elif args.spread_hours:
-        # Time-spread mode
-        result = generate_iot_data_spread_time(count=args.count, hours=args.spread_hours)
-        sys.exit(0 if result.get("success", False) else 1)
+        generator.run_continuous(interval=args.interval)
     else:
-        # One-time generation
-        result = generate_iot_data(count=args.count)
-        sys.exit(0 if result.get("success", False) else 1)
+        generator.run_once()
+
+
+if __name__ == "__main__":
+    main()

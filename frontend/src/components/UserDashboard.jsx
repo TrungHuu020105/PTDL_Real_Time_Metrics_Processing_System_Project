@@ -1,15 +1,18 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw, AlertTriangle, AlertCircle, CheckCircle, Server } from 'lucide-react'
+import { RefreshCw, AlertTriangle, AlertCircle, CheckCircle, Server, Plus } from 'lucide-react'
 import { useDevices } from '../context/DeviceContext'
 import GaugeChart from './GaugeChart'
+import AddDeviceModal from './AddDeviceModal'
 import api from '../api'
 
 export default function UserDashboard() {
-  const { devices, selectedDevice, setSelectedDevice } = useDevices()
+  const { iotDevices: devices, selectedIoTDevice: selectedDevice, setSelectedIoTDevice: setSelectedDevice, createIoTDevice } = useDevices()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [lastUpdate, setLastUpdate] = useState(new Date())
   const [alerts, setAlerts] = useState([])
+  const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
+  const [addingDevice, setAddingDevice] = useState(false)
 
   const currentDevice = devices?.find(d => d.id === selectedDevice)
 
@@ -66,6 +69,20 @@ export default function UserDashboard() {
     return labels[type] || type
   }
 
+  // Handle adding new device
+  const handleAddDevice = async (deviceData) => {
+    try {
+      setAddingDevice(true)
+      await createIoTDevice(deviceData)
+      setShowAddDeviceModal(false)
+    } catch (err) {
+      console.error('Failed to add device:', err)
+      throw err
+    } finally {
+      setAddingDevice(false)
+    }
+  }
+
   // No devices state
   if (!devices || devices.length === 0) {
     return (
@@ -73,18 +90,31 @@ export default function UserDashboard() {
         <div className="text-center max-w-md">
           <div className="bg-dark-800 border border-yellow-500/30 rounded-xl p-12 mb-6">
             <Server className="w-16 h-16 text-yellow-400 mx-auto mb-4 opacity-50" />
-            <h2 className="text-2xl font-bold text-white mb-4">No Devices Assigned</h2>
+            <h2 className="text-2xl font-bold text-white mb-4">No Devices Yet</h2>
             <p className="text-gray-400 mb-6">
-              Your administrator hasn't granted you access to any devices yet. 
-              Please contact them to add you to the monitoring system.
+              You haven't added any IoT devices yet. Create your first device by entering the sensor code and device details below.
             </p>
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-6">
               <p className="text-sm text-yellow-400">
-                💡 Once devices are assigned, you'll be able to monitor CPU, Memory, IoT sensors, and more.
+                💡 You can add IoT sensors like temperature, humidity, soil moisture, light intensity, or pressure sensors.
               </p>
             </div>
+            <button
+              onClick={() => setShowAddDeviceModal(true)}
+              className="w-full px-6 py-3 bg-neon-cyan/20 border border-neon-cyan/60 rounded-lg text-neon-cyan font-semibold hover:bg-neon-cyan/30 transition-colors flex items-center justify-center gap-2"
+            >
+              <Plus className="w-5 h-5" />
+              Add Your First Device
+            </button>
           </div>
         </div>
+
+        <AddDeviceModal
+          isOpen={showAddDeviceModal}
+          onClose={() => setShowAddDeviceModal(false)}
+          onAdd={handleAddDevice}
+          isLoading={addingDevice}
+        />
       </div>
     )
   }
@@ -123,7 +153,16 @@ export default function UserDashboard() {
 
       {/* Device Selector */}
       <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Available Devices</h3>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-lg font-semibold text-white">Available Devices</h3>
+          <button
+            onClick={() => setShowAddDeviceModal(true)}
+            className="px-3 py-1 bg-neon-cyan/20 border border-neon-cyan/60 rounded-lg text-neon-cyan text-sm hover:bg-neon-cyan/30 transition-colors flex items-center gap-1"
+          >
+            <Plus className="w-4 h-4" />
+            Add Device
+          </button>
+        </div>
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
           {devices.map(device => (
             <button
@@ -141,6 +180,13 @@ export default function UserDashboard() {
           ))}
         </div>
       </div>
+
+      <AddDeviceModal
+        isOpen={showAddDeviceModal}
+        onClose={() => setShowAddDeviceModal(false)}
+        onAdd={handleAddDevice}
+        isLoading={addingDevice}
+      />
 
       {/* Data Display */}
       {loading ? (

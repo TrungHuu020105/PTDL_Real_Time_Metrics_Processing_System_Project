@@ -1,6 +1,7 @@
 """IoT Device management routes - User-owned devices"""
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import IoTDevice, User
@@ -10,32 +11,39 @@ from app import crud
 router = APIRouter(prefix="/api/iot-devices", tags=["iot-devices"])
 
 
+# ============== SCHEMAS ==============
+
+class CreateIoTDeviceRequest(BaseModel):
+    """Request schema for creating IoT device"""
+    name: str
+    device_type: str
+    source: str
+    location: str = None
+
+
 # ============== IoT DEVICE MANAGEMENT ==============
 
 @router.post("")
 async def create_iot_device(
-    name: str,
-    device_type: str,
-    source: str,
-    location: str = None,
+    device_data: CreateIoTDeviceRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     """Create a new IoT device - User owned"""
     # Check if source already exists
-    existing = db.query(IoTDevice).filter(IoTDevice.source == source).first()
+    existing = db.query(IoTDevice).filter(IoTDevice.source == device_data.source).first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Source '{source}' already exists"
+            detail=f"Source '{device_data.source}' already exists"
         )
     
     device = IoTDevice(
         user_id=user.id,
-        name=name,
-        device_type=device_type,
-        source=source,
-        location=location,
+        name=device_data.name,
+        device_type=device_data.device_type,
+        source=device_data.source,
+        location=device_data.location,
         is_active=True
     )
     db.add(device)

@@ -98,8 +98,9 @@ export function DeviceProvider({ children }) {
       console.log('Fetching ALL IoT devices for admin...')
       const response = await api.get('/api/admin/iot-devices')
       console.log('API Response:', response.data)
-      setAllIoTDevices(response.data.devices || [])
-      console.log('AllIoTDevices updated:', response.data.devices || [])
+      // Admin view now returns users_summary with device counts
+      setAllIoTDevices(response.data)
+      console.log('AllIoTDevices updated:', response.data)
     } catch (err) {
       console.error('Failed to fetch all IoT devices:', err)
       setError(err.message)

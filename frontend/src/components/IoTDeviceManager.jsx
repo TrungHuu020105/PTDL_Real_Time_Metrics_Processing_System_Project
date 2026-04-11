@@ -3,6 +3,7 @@ import { Plus, Trash2, Edit2, Home, Radio, X, Power, PowerOff } from 'lucide-rea
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useDevices } from '../context/DeviceContext'
 import { useAuth } from '../context/AuthContext'
+import AddDeviceModal from './AddDeviceModal'
 import api from '../api'
 
 export default function IoTDeviceManager() {
@@ -22,6 +23,7 @@ export default function IoTDeviceManager() {
     console.log('IoTDeviceManager - displayDevices:', displayDevices)
   }, [isAdmin, iotDevices, allIoTDevices, displayDevices])
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
   const [showChartModal, setShowChartModal] = useState(false)
   const [selectedDeviceForChart, setSelectedDeviceForChart] = useState(null)
   const [editingId, setEditingId] = useState(null)
@@ -32,6 +34,7 @@ export default function IoTDeviceManager() {
     location: ''
   })
   const [loading, setLoading] = useState(false)
+  const [addingDevice, setAddingDevice] = useState(false)
   const [latestMetrics, setLatestMetrics] = useState({})
   const [chartData, setChartData] = useState([])
   const [chartLoading, setChartLoading] = useState(false)
@@ -255,6 +258,20 @@ export default function IoTDeviceManager() {
     return () => clearInterval(interval)
   }, [showChartModal, selectedDeviceForChart])
 
+  // Handle adding device via AddDeviceModal (for users)
+  const handleAddDevice = async (deviceData) => {
+    try {
+      setAddingDevice(true)
+      await createIoTDevice(deviceData)
+      setShowAddDeviceModal(false)
+    } catch (err) {
+      console.error('Failed to add device:', err)
+      alert('Error: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setAddingDevice(false)
+    }
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     try {
@@ -370,129 +387,134 @@ export default function IoTDeviceManager() {
 
   return (
     <div className="p-8 space-y-8">
-      {/* Header */}
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-4xl font-bold text-white mb-2">IoT Devices</h1>
-          <p className="text-gray-400">Manage your IoT sensors and devices</p>
-        </div>
-        <button
-          onClick={() => {
-            setEditingId(null)
-            setFormData({ name: '', device_type: 'temperature', source: '', location: '' })
-            setShowCreateModal(true)
-          }}
-          className="flex items-center gap-2 bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 hover:border-neon-cyan px-4 py-2 rounded-lg transition-all"
-        >
-          <Plus className="w-5 h-5" />
-          Add Device
-        </button>
-      </div>
+      {/* Admin View - User Device Count Summary */}
+      {isAdmin ? (
+        <>
+          <div>
+            <h1 className="text-4xl font-bold text-white mb-2">IoT Devices Overview</h1>
+            <p className="text-gray-400">Users and their device counts (Admin view - no device details)</p>
+          </div>
 
-      {/* Devices Grid */}
-      {displayDevices.length === 0 ? (
-        <div className="text-center py-16">
-          <Radio className="w-16 h-16 text-gray-600 mx-auto mb-4 opacity-50" />
-          <h3 className="text-xl font-semibold text-white mb-2">No IoT Devices</h3>
-          <p className="text-gray-400 mb-6">Create your first IoT device to start monitoring</p>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="inline-flex items-center gap-2 bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 px-6 py-3 rounded-lg hover:border-neon-cyan transition-all"
-          >
-            <Plus className="w-5 h-5" />
-            Create First Device
-          </button>
-        </div>
+          {/* User Device Count Table */}
+          <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+            <table className="w-full">
+              <thead className="bg-slate-900 border-b border-slate-700">
+                <tr>
+                  <th className="px-6 py-3 text-left text-cyan-400 font-semibold">User</th>
+                  <th className="px-6 py-3 text-left text-cyan-400 font-semibold">Email</th>
+                  <th className="px-6 py-3 text-left text-cyan-400 font-semibold">Device Count</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-700">
+                {displayDevices?.users_summary?.map((item) => (
+                  <tr key={item.user_id} className="hover:bg-slate-700/50 transition">
+                    <td className="px-6 py-3 text-white font-medium">{item.username}</td>
+                    <td className="px-6 py-3 text-gray-400">{item.email}</td>
+                    <td className="px-6 py-3">
+                      <span className="bg-cyan-600/20 text-cyan-400 px-3 py-1 rounded-full text-sm font-medium">
+                        {item.device_count} device{item.device_count !== 1 ? 's' : ''}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!displayDevices?.users_summary || displayDevices.users_summary.length === 0 && (
+              <div className="text-center py-8 text-gray-400">No users with devices</div>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 bg-slate-700/50 rounded-lg">
+              <p className="text-gray-300 text-sm">Total Devices</p>
+              <p className="text-cyan-400 font-bold text-2xl">{displayDevices?.total_devices || 0}</p>
+            </div>
+            <div className="p-4 bg-slate-700/50 rounded-lg">
+              <p className="text-gray-300 text-sm">Total Users</p>
+              <p className="text-cyan-400 font-bold text-2xl">{displayDevices?.total_users || 0}</p>
+            </div>
+          </div>
+        </>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {displayDevices.map(device => (
-            <div
-              key={device.id}
-              onClick={() => handleOpenChart(device)}
-              className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-6 hover:border-neon-cyan/60 hover:cursor-pointer transition-all hover:bg-dark-700"
+        <>
+          {/* User View - Device Details and Add Button */}
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-4xl font-bold text-white mb-2">IoT Devices</h1>
+              <p className="text-gray-400">Manage your IoT sensors and devices</p>
+            </div>
+            <button
+              onClick={() => setShowAddDeviceModal(true)}
+              className="flex items-center gap-2 bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 hover:border-neon-cyan px-4 py-2 rounded-lg transition-all"
             >
-              <div className="flex items-start justify-between mb-4">
-                <div>
-                  <h3 className="text-lg font-bold text-white mb-1">{device.name}</h3>
-                  <p className="text-xs text-gray-500 font-mono">Source: {device.source}</p>
-                  {deviceOwners[device.id] && (
-                    <p className="text-xs text-gray-500">Created by: {deviceOwners[device.id]}</p>
-                  )}
-                </div>
-                <span className={`text-xs text-${getDeviceTypeColor(device.device_type)} bg-${getDeviceTypeColor(device.device_type)}/20 px-2 py-1 rounded`}>
-                  {device.device_type}
-                </span>
-              </div>
+              <Plus className="w-5 h-5" />
+              Add Device
+            </button>
+          </div>
 
-              {device.location && (
-                <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
-                  <Home className="w-4 h-4" />
-                  {device.location}
-                </div>
-              )}
-
-              {/* Real-time Metric Display */}
-              <div className="bg-dark-900/50 rounded-lg p-4 mb-4 border border-neon-cyan/20">
-                <p className="text-xs text-gray-400 mb-2">Real-time Value</p>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-bold text-neon-cyan">
-                    {getLatestValue(device.id)}
-                  </span>
-                  <span className="text-sm text-gray-400">
-                    {getMetricUnit(device.device_type)}
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 mb-4">
-                <span className={`w-2 h-2 ${device.is_active ? 'bg-green-500' : 'bg-red-500'} rounded-full`}></span>
-                <span className={`text-xs ${device.is_active ? 'text-green-400' : 'text-red-400'}`}>
-                  {device.is_active ? 'Active' : 'Inactive'}
-                </span>
-              </div>
-
-              <div className="flex flex-col gap-2">
-                {isAdmin ? (
-                  <>
-                    {/* Admin buttons */}
-                    <div className="flex gap-2">
-                      {device.is_active ? (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            disconnectIoTDevice(device.id)
-                          }}
-                          className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-orange-500/20 text-orange-400 rounded hover:bg-orange-500/30 transition-all text-sm"
-                        >
-                          <PowerOff className="w-4 h-4" />
-                          Disconnect
-                        </button>
-                      ) : (
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            reconnectIoTDevice(device.id)
-                          }}
-                          className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-green-500/20 text-green-400 rounded hover:bg-green-500/30 transition-all text-sm"
-                        >
-                          <Power className="w-4 h-4" />
-                          Reconnect
-                        </button>
+          {/* Devices Grid - Only for Users */}
+          {displayDevices.length === 0 ? (
+            <div className="text-center py-16">
+              <Radio className="w-16 h-16 text-gray-600 mx-auto mb-4 opacity-50" />
+              <h3 className="text-xl font-semibold text-white mb-2">No IoT Devices</h3>
+              <p className="text-gray-400 mb-6">Create your first IoT device to start monitoring</p>
+              <button
+                onClick={() => setShowAddDeviceModal(true)}
+                className="inline-flex items-center gap-2 bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 px-6 py-3 rounded-lg hover:border-neon-cyan transition-all"
+              >
+                <Plus className="w-5 h-5" />
+                Create First Device
+              </button>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {displayDevices.map(device => (
+                <div
+                  key={device.id}
+                  onClick={() => handleOpenChart(device)}
+                  className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-6 hover:border-neon-cyan/60 hover:cursor-pointer transition-all hover:bg-dark-700"
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <h3 className="text-lg font-bold text-white mb-1">{device.name}</h3>
+                      <p className="text-xs text-gray-500 font-mono">Source: {device.source}</p>
+                      {deviceOwners[device.id] && (
+                        <p className="text-xs text-gray-500">Created by: {deviceOwners[device.id]}</p>
                       )}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          adminDeleteIoTDevice(device.id)
-                        }}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all text-sm"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                        Delete
-                      </button>
                     </div>
-                  </>
-                ) : (
-                  <>
+                    <span className={`text-xs text-${getDeviceTypeColor(device.device_type)} bg-${getDeviceTypeColor(device.device_type)}/20 px-2 py-1 rounded`}>
+                      {device.device_type}
+                    </span>
+                  </div>
+
+                  {device.location && (
+                    <div className="flex items-center gap-2 text-sm text-gray-400 mb-4">
+                      <Home className="w-4 h-4" />
+                      {device.location}
+                    </div>
+                  )}
+
+                  {/* Real-time Metric Display */}
+                  <div className="bg-dark-900/50 rounded-lg p-4 mb-4 border border-neon-cyan/20">
+                    <p className="text-xs text-gray-400 mb-2">Real-time Value</p>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-2xl font-bold text-neon-cyan">
+                        {getLatestValue(device.id)}
+                      </span>
+                      <span className="text-sm text-gray-400">
+                        {getMetricUnit(device.device_type)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 mb-4">
+                    <span className={`w-2 h-2 ${device.is_active ? 'bg-green-500' : 'bg-red-500'} rounded-full`}></span>
+                    <span className={`text-xs ${device.is_active ? 'text-green-400' : 'text-red-400'}`}>
+                      {device.is_active ? 'Active' : 'Inactive'}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col gap-2">
                     {/* User buttons */}
                     <div className="flex gap-2">
                       <button
@@ -516,12 +538,12 @@ export default function IoTDeviceManager() {
                         Delete
                       </button>
                     </div>
-                  </>
-                )}
-              </div>
+                  </div>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
 
       {/* Modal */}
@@ -733,6 +755,16 @@ export default function IoTDeviceManager() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Add Device Modal - for Users */}
+      {!isAdmin && (
+        <AddDeviceModal
+          isOpen={showAddDeviceModal}
+          onClose={() => setShowAddDeviceModal(false)}
+          onAdd={handleAddDevice}
+          isLoading={addingDevice}
+        />
       )}
     </div>
   )

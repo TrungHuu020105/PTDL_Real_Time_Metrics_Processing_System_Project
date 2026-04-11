@@ -46,7 +46,7 @@ function AppContent() {
         } else {
           // Redirect users to IoT Devices instead
           setActiveMenu('iot-devices')
-          return <IoTDeviceManager />
+          return <UserDashboard />
         }
       case 'iot-devices':
         return <IoTDeviceManager />
@@ -65,8 +65,8 @@ function AppContent() {
       case 'admin-panel':
         return <AdminPanel />
       default:
-        // Default: admin gets dashboard, users get IoT devices
-        return user?.role === 'admin' ? <AdminDashboard /> : <IoTDeviceManager />
+        // Default: admin gets dashboard, users get IoT devices (UserDashboard)
+        return user?.role === 'admin' ? <AdminDashboard /> : <UserDashboard />
     }
   }
 

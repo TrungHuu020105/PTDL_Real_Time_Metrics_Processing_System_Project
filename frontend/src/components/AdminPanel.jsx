@@ -15,6 +15,8 @@ export default function AdminPanel() {
   const [processingRequest, setProcessingRequest] = useState(null)
   const [editingPrice, setEditingPrice] = useState({})
   const [updatingServer, setUpdatingServer] = useState(null)
+  const [allIoTDevices, setAllIoTDevices] = useState([])
+  const [userDeviceStats, setUserDeviceStats] = useState({})
 
   // Fetch pending users
   const fetchPendingUsers = async () => {
@@ -104,6 +106,39 @@ export default function AdminPanel() {
     }
   }
 
+  // Fetch IoT device statistics
+  const fetchIoTDeviceStats = async () => {
+    try {
+      setLoading(true)
+      const response = await api.get('/api/admin/iot-devices')
+      const devices = response.data.devices || []
+      setAllIoTDevices(devices)
+      
+      // Calculate statistics: group devices by user_id
+      const stats = {}
+      devices.forEach(device => {
+        const userId = device.user_id
+        if (!stats[userId]) {
+          stats[userId] = {
+            userId,
+            username: device.username || `User ${userId}`,
+            email: device.email || 'N/A',
+            deviceCount: 0,
+            devices: []
+          }
+        }
+        stats[userId].deviceCount += 1
+        stats[userId].devices.push(device)
+      })
+      setUserDeviceStats(stats)
+    } catch (error) {
+      console.error('Failed to fetch IoT device stats:', error)
+      setMessage('Failed to fetch IoT device statistics: ' + error.response?.data?.detail)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // Update server price
   const updateServerPrice = async (serverId, newPrice) => {
     try {
@@ -163,6 +198,7 @@ export default function AdminPanel() {
     fetchAllUsers()
     fetchPendingRequests()
     fetchAllServers()
+    fetchIoTDeviceStats()
   }, [])
 
   // Auto-clear message after 3 seconds
@@ -228,6 +264,16 @@ export default function AdminPanel() {
           }`}
         >
           Server Management
+        </button>
+        <button
+          onClick={() => setActiveTab('iot-devices')}
+          className={`px-4 py-2 font-semibold border-b-2 transition-all ${
+            activeTab === 'iot-devices'
+              ? 'text-neon-cyan border-neon-cyan'
+              : 'text-gray-400 border-transparent hover:text-gray-300'
+          }`}
+        >
+          IoT Devices ({allIoTDevices.length})
         </button>
       </div>
 
@@ -422,6 +468,84 @@ export default function AdminPanel() {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {/* IoT Devices Tab */}
+      {activeTab === 'iot-devices' && (
+        <div className="space-y-6">
+          {/* Statistics Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="card-border p-4 bg-dark-800 rounded-lg border border-neon-cyan/30">
+              <p className="text-gray-500 text-sm uppercase tracking-widest">Total Devices</p>
+              <p className="text-4xl font-bold text-neon-cyan mt-2">{allIoTDevices.length}</p>
+            </div>
+            <div className="card-border p-4 bg-dark-800 rounded-lg border border-neon-yellow/30">
+              <p className="text-gray-500 text-sm uppercase tracking-widest">Active Users</p>
+              <p className="text-4xl font-bold text-neon-yellow mt-2">{Object.keys(userDeviceStats).length}</p>
+            </div>
+            <div className="card-border p-4 bg-dark-800 rounded-lg border border-neon-purple/30">
+              <p className="text-gray-500 text-sm uppercase tracking-widest">Avg per User</p>
+              <p className="text-4xl font-bold text-neon-purple mt-2">
+                {Object.keys(userDeviceStats).length > 0
+                  ? (allIoTDevices.length / Object.keys(userDeviceStats).length).toFixed(1)
+                  : 0}
+              </p>
+            </div>
+          </div>
+
+          {/* User Device Statistics Table */}
+          <div className="card-border bg-dark-800 rounded-lg border border-gray-700 overflow-hidden">
+            <div className="p-4 border-b border-gray-700 bg-dark-900">
+              <h3 className="text-lg font-semibold text-white">Device Distribution by User</h3>
+            </div>
+            {Object.keys(userDeviceStats).length === 0 ? (
+              <div className="p-6 text-center text-gray-400">
+                <p>No IoT devices registered yet</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-gray-700 bg-dark-900/50">
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Username</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Email</th>
+                      <th className="px-6 py-3 text-right text-xs font-semibold text-gray-400 uppercase">Device Count</th>
+                      <th className="px-6 py-3 text-left text-xs font-semibold text-gray-400 uppercase">Device List</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.values(userDeviceStats)
+                      .sort((a, b) => b.deviceCount - a.deviceCount)
+                      .map((stat) => (
+                        <tr key={stat.userId} className="border-b border-gray-700 hover:bg-dark-900/50 transition-all">
+                          <td className="px-6 py-3">
+                            <p className="text-white font-semibold">{stat.username}</p>
+                          </td>
+                          <td className="px-6 py-3">
+                            <p className="text-gray-400 text-sm">{stat.email}</p>
+                          </td>
+                          <td className="px-6 py-3 text-right">
+                            <span className="inline-block px-3 py-1 bg-neon-cyan/20 text-neon-cyan rounded-full font-semibold">
+                              {stat.deviceCount}
+                            </span>
+                          </td>
+                          <td className="px-6 py-3">
+                            <div className="flex gap-2 flex-wrap">
+                              {stat.devices.map((device) => (
+                                <span key={device.id} className="text-xs bg-gray-700/50 text-gray-300 px-2 py-1 rounded">
+                                  {device.name}
+                                </span>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -3,7 +3,10 @@ WebSocket routes cho Real-Time Metrics Monitoring
 """
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from app.websocket_manager import ConnectionManager
-from app.schemas_ws import MetricsData, StatusResponse
+from app.schemas_ws import MetricsData, IotMetricsData, StatusResponse
+from app.schemas import MetricCreate
+from app.database import SessionLocal
+from app.crud import create_metrics_bulk
 import json
 from datetime import datetime
 
@@ -14,17 +17,61 @@ router = APIRouter(tags=["WebSocket Metrics"])
 manager = ConnectionManager()
 
 
+def save_iot_metric_to_db(metric_type: str, source: str, value: float, save_flag: bool):
+    """
+    Save IoT metric to database - but only if save_flag is True
+    
+    Architecture:
+    - Frontend receives 100% of realtime data (smooth display)
+    - Database only saves "important" data (filtered by threshold)
+    This separates realtime streaming from intelligent persistence
+    """
+    # Log to file for debugging
+    with open("backend_filtering.log", "a") as f:
+        f.write(f"{metric_type}={value} | saved={save_flag}\n")
+    
+    if not save_flag:
+        return  # Skip DB save for non-important data
+    
+    try:
+        db = SessionLocal()
+        metric = MetricCreate(
+            metric_type=metric_type,
+            value=value,
+            source=source,
+            timestamp=None
+        )
+        create_metrics_bulk(db, [metric])
+        db.close()
+        print(f"💾 Saved {metric_type}={value} (source={source}) to DB")
+    except Exception as e:
+        print(f"❌ DB save error: {e}")
+        if db:
+            db.close()
+
+
 @router.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     """
     WebSocket endpoint để client kết nối và gửi metrics.
     
-    Endpoint: ws://SERVER_IP:8000/ws/{client_id}
+    Endpoint: ws://SERVER_IP:8000/api/ws/{client_id}
     
-    Client gửi JSON format:
+    Hỗ trợ 2 loại metrics:
+    
+    1. System Metrics (CPU/RAM):
     {
         "cpu": 45.5,
         "ram": 72.3,
+        "timestamp": "2024-04-06T10:30:00"
+    }
+    
+    2. IoT Sensor Metrics:
+    {
+        "metric_type": "temperature",
+        "value": 24.5,
+        "source": "sensor_1",
+        "unit": "°C",
         "timestamp": "2024-04-06T10:30:00"
     }
     """
@@ -43,18 +90,49 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                 # Parse JSON
                 metrics_dict = json.loads(data)
                 
-                # Validate với Pydantic schema
-                metrics = MetricsData(**metrics_dict)
-                
-                # Lưu metrics
-                manager.save_metrics(client_id, metrics.model_dump())
-                
-                # Gửi confirmation lại cho client (optional)
-                await websocket.send_text(json.dumps({
-                    "status": "ok",
-                    "message": f"Metrics received from {client_id}",
-                    "server_time": datetime.now().isoformat()
-                }))
+                # Try IoT metrics first (has metric_type field)
+                if "metric_type" in metrics_dict:
+                    try:
+                        metrics = IotMetricsData(**metrics_dict)
+                        manager.save_metrics(client_id, metrics.model_dump())
+                        # DEBUG: Print received saved flag
+                        print(f"[DEBUG] Received: {metrics.metric_type} | saved={metrics.saved}")
+                        # Save to database - but only if "saved" flag is True
+                        save_iot_metric_to_db(
+                            metrics.metric_type, 
+                            metrics.source, 
+                            metrics.value,
+                            metrics.saved  # Check "saved" flag for DB filtering
+                        )
+                        # Send confirmation
+                        await websocket.send_text(json.dumps({
+                            "status": "ok",
+                            "message": f"IoT metric received: {metrics.metric_type}",
+                            "server_time": datetime.now().isoformat()
+                        }))
+                    except ValueError as e:
+                        print(f"⚠️ IoT Validation error từ {client_id}: {e}")
+                        await websocket.send_text(json.dumps({
+                            "status": "error",
+                            "message": f"IoT Validation error: {str(e)}"
+                        }))
+                # Else try system metrics (CPU/RAM)
+                else:
+                    try:
+                        metrics = MetricsData(**metrics_dict)
+                        manager.save_metrics(client_id, metrics.model_dump())
+                        # Send confirmation
+                        await websocket.send_text(json.dumps({
+                            "status": "ok",
+                            "message": f"System metrics received from {client_id}",
+                            "server_time": datetime.now().isoformat()
+                        }))
+                    except ValueError as e:
+                        print(f"⚠️ System Validation error từ {client_id}: {e}")
+                        await websocket.send_text(json.dumps({
+                            "status": "error",
+                            "message": f"System Validation error: {str(e)}"
+                        }))
                 
             except json.JSONDecodeError as e:
                 print(f"⚠️ JSON parsing error từ {client_id}: {e}")
@@ -62,14 +140,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                     "status": "error",
                     "message": f"Invalid JSON format: {str(e)}"
                 }))
-                
-            except ValueError as e:
-                print(f"⚠️ Validation error từ {client_id}: {e}")
-                await websocket.send_text(json.dumps({
-                    "status": "error",
-                    "message": f"Validation error: {str(e)}"
-                }))
-                
+                    
     except WebSocketDisconnect:
         manager.disconnect(client_id)
     except Exception as e:

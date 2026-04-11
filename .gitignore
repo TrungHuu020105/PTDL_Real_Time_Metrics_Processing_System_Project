@@ -34,6 +34,8 @@ env/
 *~
 .DS_Store
 
+metrics.db
+*.db
 
 # Environment variables
 .env

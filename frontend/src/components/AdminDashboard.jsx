@@ -24,7 +24,7 @@ export default function AdminDashboard() {
     try {
       setLoading(true)
       const [serversRes, usersRes, alertsRes, iotDevicesRes] = await Promise.all([
-        api.get('/api/servers').catch(() => ({ data: { servers: [] } })),
+        api.get('/api/servers/admin/servers').catch(() => ({ data: { servers: [] } })),
         api.get('/api/admin/users').catch(() => ({ data: { users: [] } })),
         api.get('/api/alerts').catch(() => ({ data: { alerts: [] } })),
         api.get('/api/admin/iot-devices').catch(() => ({ data: { devices: [] } }))

@@ -7,7 +7,7 @@ from app.api import routes_metrics, routes_alerts, routes_auth, routes_admin, ro
 from app.crud import delete_old_alerts, get_user_by_username, create_user
 from app.schemas import UserRegister
 from app.api.routes_auth import hash_password
-from app.models import Device, UserDevicePermission
+from app.models import Device, UserDevicePermission, AvailableServer
 
 # Initialize database on startup
 init_db()
@@ -56,20 +56,38 @@ async def startup_event():
     try:
         # Clean up old alerts
         deleted = delete_old_alerts(db, days=15)
-        print(f"✓ [Startup] Cleaned up {deleted} alerts older than 15 days")
+        print(f"[OK] [Startup] Cleaned up {deleted} alerts older than 15 days")
         
         # Create demo users if they don't exist
         admin_user = get_user_by_username(db, "admin")
         if not admin_user:
             admin_data = UserRegister(username="admin", email="admin@example.com", password="123456", role="admin")
             admin_user = create_user(db, admin_data, hash_password("123456"))
-            print("✓ [Startup] Created demo admin user (admin/123456)")
+            print("[OK] [Startup] Created demo admin user (admin/123456)")
         
         user_user = get_user_by_username(db, "user")
         if not user_user:
             user_data = UserRegister(username="user", email="user@example.com", password="123456", role="user")
             user_user = create_user(db, user_data, hash_password("123456"))
-            print("✓ [Startup] Created demo user (user/123456)")
+            print("[OK] [Startup] Created demo user (user/123456)")
+        
+        # Create demo server if it doesn't exist
+        demo_server = db.query(AvailableServer).filter(AvailableServer.name == "Server 1").first()
+        if not demo_server:
+            server = AvailableServer(
+                name="Server 1",
+                specs="System Server - Metrics Only",
+                cpu_cores=8,
+                ram_gb=16,
+                os_type="Windows",
+                price_per_hour=0.0,
+                is_available=True,
+                created_by=admin_user.id
+            )
+            db.add(server)
+            db.commit()
+            db.refresh(server)
+            print("[OK] [Startup] Created demo server: Server 1")
         
         # Create demo devices if they don't exist
         demo_devices = [
@@ -103,10 +121,10 @@ async def startup_event():
                 )
                 db.add(permission)
                 db.commit()
-                print(f"✓ [Startup] Created demo device: {demo_device['name']}")
+                print(f"[OK] [Startup] Created demo device: {demo_device['name']}")
             
     except Exception as e:
-        print(f"✗ [Startup Error] {str(e)}")
+        print(f"[ERROR] [Startup Error] {str(e)}")
     finally:
         db.close()
 

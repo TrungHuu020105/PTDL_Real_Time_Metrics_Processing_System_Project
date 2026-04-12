@@ -26,6 +26,10 @@ class ServerUpdateRequest(BaseModel):
 
 class SubscriptionRequestPayload(BaseModel):
     server_id: int
+    subscription_duration_months: int = 1  # Duration in months: 1, 3, 6, or 12
+
+    class Config:
+        from_attributes = True
 
 router = APIRouter(prefix="/api/servers", tags=["servers"])
 
@@ -87,7 +91,9 @@ async def get_all_servers(
     db: Session = Depends(get_db)
 ):
     """[ADMIN] Get all servers"""
+    print(f"[get_all_servers] Admin user: {admin.username}, ID: {admin.id}")
     servers = db.query(AvailableServer).all()
+    print(f"[get_all_servers] Found {len(servers)} servers in database")
     
     # Count subscribers for each server
     server_list = []
@@ -109,6 +115,7 @@ async def get_all_servers(
             "created_at": server.created_at
         })
     
+    print(f"[get_all_servers] Returning {len(server_list)} servers")
     return {
         "servers": server_list,
         "total": len(servers)
@@ -169,6 +176,43 @@ async def get_available_servers(db: Session = Depends(get_db)):
     return {
         "servers": server_list,
         "total": len(servers)
+    }
+
+
+@router.get("/{server_id}/subscribers")
+async def get_server_subscribers(
+    server_id: int,
+    db: Session = Depends(get_db)
+):
+    """Get list of subscribers for a server"""
+    server = db.query(AvailableServer).filter(AvailableServer.id == server_id).first()
+    
+    if not server:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Server not found"
+        )
+    
+    # Get all subscriptions for this server
+    subscriptions = db.query(ServerSubscription).filter(
+        ServerSubscription.server_id == server_id
+    ).all()
+    
+    subscribers = []
+    for sub in subscriptions:
+        user = db.query(User).filter(User.id == sub.user_id).first()
+        if user:
+            subscribers.append({
+                "username": user.username,
+                "email": user.email,
+                "subscribed_at": sub.subscribed_at,
+                "expiration_date": sub.expiration_date,
+                "subscription_duration_months": sub.subscription_duration_months
+            })
+    
+    return {
+        "subscribers": subscribers,
+        "total": len(subscribers)
     }
 
 
@@ -252,9 +296,15 @@ async def get_my_subscriptions(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Get all servers the user is subscribed to"""
+    """Get all servers the user is subscribed to (excluding expired subscriptions)"""
+    from datetime import datetime, timezone, timedelta
+    
+    vietnam_tz = timezone(timedelta(hours=7))
+    now = datetime.now(vietnam_tz)
+    
     subscriptions = db.query(ServerSubscription).filter(
-        ServerSubscription.user_id == user.id
+        ServerSubscription.user_id == user.id,
+        ServerSubscription.expiration_date > now  # Only active, non-expired subscriptions
     ).all()
     
     servers = []
@@ -274,6 +324,8 @@ async def get_my_subscriptions(
                 "is_available": server.is_available,
                 "price_per_hour": server.price_per_hour,
                 "subscribed_at": sub.subscribed_at,
+                "expiration_date": sub.expiration_date,
+                "subscription_duration_months": sub.subscription_duration_months,
                 "created_at": server.created_at
             })
     
@@ -288,17 +340,26 @@ async def get_my_subscriptions(
 @router.post("/requests")
 async def create_subscription_request(
     server_id: Optional[int] = None,
+    duration_months: Optional[int] = None,
     payload: Optional[SubscriptionRequestPayload] = Body(default=None),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """User creates a request to subscribe to a server"""
+    """User creates a request to subscribe to a server with specified duration"""
     effective_server_id = server_id if server_id is not None else (payload.server_id if payload else None)
+    effective_duration = duration_months if duration_months is not None else (payload.subscription_duration_months if payload else 1)
 
     if effective_server_id is None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="server_id is required"
+        )
+
+    # Validate duration
+    if effective_duration not in [1, 3, 6, 12]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="subscription_duration_months must be 1, 3, 6, or 12"
         )
 
     # Check if server exists
@@ -310,7 +371,7 @@ async def create_subscription_request(
         )
     
     # Create subscription request using CRUD
-    request = crud.create_subscription_request(db, user.id, effective_server_id)
+    request = crud.create_subscription_request(db, user.id, effective_server_id, effective_duration)
     
     if not request:
         raise HTTPException(
@@ -322,6 +383,7 @@ async def create_subscription_request(
         "id": request.id,
         "user_id": request.user_id,
         "server_id": request.server_id,
+        "subscription_duration_months": request.subscription_duration_months,
         "status": request.status,
         "requested_at": request.requested_at
     }

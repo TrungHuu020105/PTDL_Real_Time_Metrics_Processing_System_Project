@@ -41,19 +41,34 @@ export default function ServerStore() {
   const [serverChartLoading, setServerChartLoading] = useState(false)
   const [serverCpuStats, setServerCpuStats] = useState({ average: 0, min: 0, max: 0 })
   const [serverMemoryStats, setServerMemoryStats] = useState({ average: 0, min: 0, max: 0 })
+  const [userServerConnectionStatus, setUserServerConnectionStatus] = useState({})
+  
+  // Subscription duration modal state
+  const [showDurationModal, setShowDurationModal] = useState(false)
+  const [selectedServerForDuration, setSelectedServerForDuration] = useState(null)
+  const [selectedDuration, setSelectedDuration] = useState(1)
+  
+  // Subscribers modal state
+  const [showSubscribersModal, setShowSubscribersModal] = useState(false)
+  const [selectedServerForSubscribers, setSelectedServerForSubscribers] = useState(null)
+  const [subscribersList, setSubscribersList] = useState([])
+  const [loadingSubscribers, setLoadingSubscribers] = useState(false)
 
   const isAdmin = user?.role === 'admin'
 
   useEffect(() => {
+    console.log('[ServerStore] Effect triggered - isAdmin:', isAdmin, 'user:', user)
     if (isAdmin) {
+      console.log('[ServerStore] Calling fetchAllServers because isAdmin=true')
       fetchAllServers()
       fetchPendingRequests()
       fetchSystemInfo() // Fetch system info when admin view loads
     } else {
-      fetchAvailableServers()
+      console.log('[ServerStore] User is not admin, calling fetchUserAvailableServers')
+      fetchUserAvailableServers()
       fetchUserRequests()
     }
-  }, [isAdmin])
+  }, [isAdmin, user])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -174,10 +189,30 @@ export default function ServerStore() {
   // ===== ADMIN FUNCTIONS =====
   const fetchAllServers = async () => {
     try {
+      console.log('[ServerStore] isAdmin:', isAdmin)
+      console.log('[ServerStore] Calling /api/servers/admin/servers')
       const response = await api.get('/api/servers/admin/servers')
+      console.log('[ServerStore] Full response:', response)
+      console.log('[ServerStore] Fetched all servers for admin:', response.data.servers)
+      console.log('[ServerStore] Servers length:', response.data.servers?.length)
       setAllServers(response.data.servers || [])
     } catch (err) {
-      console.error('Failed to fetch servers:', err)
+      console.error('[ServerStore] Failed to fetch servers - Error:', err)
+      console.error('[ServerStore] Error response data:', err.response?.data)
+      console.error('[ServerStore] Error status:', err.response?.status)
+    }
+  }
+
+  const fetchUserAvailableServers = async () => {
+    try {
+      const response = await api.get('/api/servers')
+      console.log('[ServerStore] Fetched available servers for user:', response.data.servers)
+      // Store in a separate state for user view
+      if (!isAdmin) {
+        setAllServers(response.data.servers || [])
+      }
+    } catch (err) {
+      console.error('Failed to fetch available servers:', err)
     }
   }
 
@@ -194,6 +229,31 @@ export default function ServerStore() {
 
   const getRequestsForServer = (serverId) => {
     return pendingRequests.filter(r => r.server_id === serverId)
+  }
+
+  const fetchSubscribersForServer = async (serverId) => {
+    try {
+      setLoadingSubscribers(true)
+      const response = await api.get(`/api/servers/${serverId}/subscribers`)
+      setSubscribersList(response.data.subscribers || [])
+    } catch (err) {
+      console.error('Failed to fetch subscribers:', err)
+      setSubscribersList([])
+    } finally {
+      setLoadingSubscribers(false)
+    }
+  }
+
+  const openSubscribersModal = (serverId) => {
+    setSelectedServerForSubscribers(serverId)
+    setShowSubscribersModal(true)
+    fetchSubscribersForServer(serverId)
+  }
+
+  const closeSubscribersModal = () => {
+    setShowSubscribersModal(false)
+    setSelectedServerForSubscribers(null)
+    setSubscribersList([])
   }
 
   const updateServerPrice = async (serverId, newPrice) => {
@@ -403,11 +463,14 @@ export default function ServerStore() {
     }
   }
 
-  const handleRequestSubscription = async (serverId) => {
+  const handleRequestSubscription = async (serverId, durationMonths = 1) => {
     try {
       setSubscribing(prev => ({ ...prev, [serverId]: true }))
       const response = await api.post('/api/servers/requests', null, {
-        params: { server_id: serverId }
+        params: {
+          server_id: serverId,
+          duration_months: durationMonths
+        }
       })
       if (response.data) {
         alert('Subscription request sent! Please wait for admin approval.')
@@ -429,14 +492,19 @@ export default function ServerStore() {
     return myServers.some(s => s.id === serverId)
   }
 
-  const handleSubscribe = async (serverId) => {
+  const handleSubscribe = (serverId) => {
+    // Open duration selection modal instead of immediately subscribing
+    setSelectedServerForDuration(serverId)
+    setSelectedDuration(1)  // Default to 1 month
+    setShowDurationModal(true)
+  }
+
+  const handleConfirmSubscription = async () => {
     try {
-      setSubscribing(prev => ({ ...prev, [serverId]: true }))
-      await handleRequestSubscription(serverId)
+      await handleRequestSubscription(selectedServerForDuration, selectedDuration)
+      setShowDurationModal(false)
     } catch (err) {
       alert('Error: ' + err.message)
-    } finally {
-      setSubscribing(prev => ({ ...prev, [serverId]: false }))
     }
   }
 
@@ -611,30 +679,26 @@ export default function ServerStore() {
   const localhostRequests = localhostServer ? getRequestsForServer(localhostServer.id) : []
 
   useEffect(() => {
-    if (!isAdmin) {
-      setAdminServerMetrics({})
-      return
-    }
-
-    if (allServers.length === 0) {
-      setAdminServerMetrics({})
-      return
-    }
-
     let isMounted = true
 
-    const getSourceForServer = (server) => {
-      if (localhostServer && server.id === localhostServer.id) {
-        return 'system_monitor'
-      }
-      return `server_${server.id}`
-    }
-
-    const fetchAdminServerMetrics = async () => {
+    const fetchServerMetrics = async () => {
       try {
+        // Both admin and user use allServers now (admin from /api/servers/admin/servers, user from /api/servers)
+        const serversToCheck = allServers
+        
+        console.log(`[ServerStore] Fetching metrics for ${isAdmin ? 'admin' : 'user'} - servers count:`, serversToCheck.length, 'servers:', serversToCheck)
+        
+        if (serversToCheck.length === 0) {
+          console.log('[ServerStore] No servers to check, setting empty metrics')
+          setAdminServerMetrics({})
+          return
+        }
+
         const metricEntries = await Promise.all(
-          allServers.map(async (server) => {
-            const source = getSourceForServer(server)
+          serversToCheck.map(async (server) => {
+            // For Server 1 (localhost), use 'system_monitor' source for all users
+            const source = server.id === 1 ? 'system_monitor' : `server_${server.id}`
+            
             try {
               const response = await api.get('/api/metrics/latest', {
                 params: { source }
@@ -647,28 +711,39 @@ export default function ServerStore() {
                   memory: response.data?.latest_memory ?? null
                 }
               ]
-            } catch {
+            } catch (err) {
+              console.error(`[ServerStore] Failed to fetch metrics for server ${server.id}:`, err)
               return [server.id, { cpu: null, memory: null }]
             }
           })
         )
 
         if (isMounted) {
-          setAdminServerMetrics(Object.fromEntries(metricEntries))
+          const metricsObj = Object.fromEntries(metricEntries)
+          console.log('[ServerStore] Metrics fetched:', metricsObj)
+          console.log('[ServerStore] Server 1 metrics:', metricsObj[1])
+          console.log('[ServerStore] Server 2 metrics:', metricsObj[2])
+          console.log('[ServerStore] Server 3 metrics:', metricsObj[3])
+          setAdminServerMetrics(metricsObj)
         }
       } catch (err) {
-        console.error('Failed to fetch admin server metrics:', err)
+        console.error('Failed to fetch server metrics:', err)
       }
     }
 
-    fetchAdminServerMetrics()
-    const interval = setInterval(fetchAdminServerMetrics, 5000)
+    fetchServerMetrics()
+    const interval = setInterval(fetchServerMetrics, 5000)
 
     return () => {
       isMounted = false
       clearInterval(interval)
     }
-  }, [isAdmin, allServers, localhostServer])
+  }, [isAdmin, allServers])
+
+  // Separate effect to trigger metrics fetch when component first mounts
+  useEffect(() => {
+    console.log('[ServerStore] Component mounted, isAdmin:', isAdmin)
+  }, [])
 
   const handleLocalhostEdit = async (e) => {
     e.stopPropagation()
@@ -768,7 +843,7 @@ export default function ServerStore() {
             {/* Localhost Server Card for Admin */}
             <div 
               onClick={() => fetchServerChart(localhostServer?.id || 1, localhostServer?.name || 'Server 1')}
-              className="mb-6 bg-dark-800 border border-neon-cyan/30 rounded-xl p-6 hover:border-neon-cyan/60 hover:cursor-pointer transition-all hover:bg-dark-700 relative"
+              className={`mb-6 bg-dark-800 border border-neon-cyan/30 rounded-xl p-6 hover:border-neon-cyan/60 hover:cursor-pointer transition-all hover:bg-dark-700 relative ${localhostMetrics.cpu !== null ? '' : 'opacity-50'}`}
             >
               {/* Edit Button - Top Right Corner */}
               <button
@@ -846,6 +921,44 @@ export default function ServerStore() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-2 gap-4 mb-4">
+              </div>
+
+              {/* Subscribers Button + Connection Status - Side by Side */}
+              <div className="flex items-center gap-3 mb-3">
+                {/* Subscribers Button - Compact */}
+                {(localhostServer?.subscribers_count || 0) > 0 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      localhostServer && openSubscribersModal(localhostServer.id)
+                    }}
+                    className="px-3 py-2 bg-neon-green/20 text-neon-green border border-neon-green/60 rounded-lg hover:bg-neon-green/30 hover:border-neon-green transition-all font-semibold text-sm flex items-center gap-1.5"
+                  >
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v2h8v-2zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-2a4 4 0 00-8 0v2a2 2 0 002 2h4a2 2 0 002-2z"></path>
+                    </svg>
+                    Subscribers ({localhostServer?.subscribers_count || 0})
+                  </button>
+                )}
+
+                {/* Connection Status */}
+                <div className="flex items-center gap-2">
+                  {localhostMetrics.cpu !== null ? (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-neon-green"></div>
+                      <p className="text-sm font-semibold text-neon-green">✓ Có kết nối</p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                      <p className="text-sm font-semibold text-red-400">✗ Không có kết nối</p>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Request Badge */}
               {localhostRequests.length > 0 && localhostServer && (
                 <button
                   onClick={(e) => {
@@ -865,15 +978,22 @@ export default function ServerStore() {
               <p className="text-gray-400">No other servers available</p>
             ) : (
               <div className="space-y-4">
-                {nonLocalServers.map((server) => {
+                {[...nonLocalServers]
+                  .sort((a, b) => {
+                    const aConnected = (adminServerMetrics[a.id]?.cpu ?? null) !== null
+                    const bConnected = (adminServerMetrics[b.id]?.cpu ?? null) !== null
+                    return bConnected - aConnected // true (1) first, false (0) last
+                  })
+                  .map((server) => {
                   const serverRequests = getRequestsForServer(server.id)
                   const serverMetrics = adminServerMetrics[server.id] || { cpu: null, memory: null }
+                  const isConnected = serverMetrics.cpu !== null
 
                   return (
                     <div
                       key={server.id}
                       onClick={() => fetchServerChart(server.id, server.name)}
-                      className="bg-dark-800 border border-neon-cyan/30 rounded-xl p-6 hover:border-neon-cyan/60 hover:cursor-pointer transition-all hover:bg-dark-700 relative"
+                      className={`bg-dark-800 border border-neon-cyan/30 rounded-xl p-6 hover:border-neon-cyan/60 hover:cursor-pointer transition-all hover:bg-dark-700 relative ${isConnected ? '' : 'opacity-50'}`}
                     >
                       {/* Edit Button - Top Right Corner */}
                       <button
@@ -950,9 +1070,41 @@ export default function ServerStore() {
                         </div>
                       </div>
 
-                      <div className="mb-4">
-                        <p className="text-xs text-gray-500">Subscribers</p>
-                        <p className="text-sm font-semibold text-neon-green">{server.subscribers_count || 0}</p>
+                      <div className="grid grid-cols-2 gap-4 mb-4">
+                      </div>
+
+                      {/* Subscribers Button + Connection Status - Side by Side */}
+                      <div className="flex items-center gap-3 mb-3">
+                        {/* Subscribers Button - Compact */}
+                        {(server.subscribers_count || 0) > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openSubscribersModal(server.id)
+                            }}
+                            className="px-3 py-2 bg-neon-green/20 text-neon-green border border-neon-green/60 rounded-lg hover:bg-neon-green/30 hover:border-neon-green transition-all font-semibold text-sm flex items-center gap-1.5"
+                          >
+                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v2h8v-2zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-2a4 4 0 00-8 0v2a2 2 0 002 2h4a2 2 0 002-2z"></path>
+                            </svg>
+                            Subscribers ({server.subscribers_count || 0})
+                          </button>
+                        )}
+
+                        {/* Connection Status */}
+                        <div className="flex items-center gap-2">
+                          {serverMetrics.cpu !== null ? (
+                            <>
+                              <div className="w-2 h-2 rounded-full bg-neon-green"></div>
+                              <p className="text-sm font-semibold text-neon-green">✓ Có kết nối</p>
+                            </>
+                          ) : (
+                            <>
+                              <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                              <p className="text-sm font-semibold text-red-400">✗ Không có kết nối</p>
+                            </>
+                          )}
+                        </div>
                       </div>
 
                       {/* Request Badge */}
@@ -1286,7 +1438,9 @@ export default function ServerStore() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-6">
               <p className="text-gray-400 text-sm mb-2">Available Servers</p>
-              <p className="text-3xl font-bold text-neon-cyan">{availableServers.length}</p>
+              <p className="text-3xl font-bold text-neon-cyan">
+                {availableServers.filter(s => (adminServerMetrics[s.id]?.cpu ?? null) !== null).length}
+              </p>
             </div>
             <div className="bg-dark-800 border border-neon-green/20 rounded-xl p-6">
               <p className="text-gray-400 text-sm mb-2">My Subscriptions</p>
@@ -1305,19 +1459,58 @@ export default function ServerStore() {
             <div className="text-center py-16">
               <p className="text-gray-400">Loading servers...</p>
             </div>
-          ) : availableServers.length === 0 ? (
-            <div className="text-center py-16">
-              <Server className="w-16 h-16 text-gray-600 mx-auto mb-4 opacity-50" />
-              <h3 className="text-xl font-semibold text-white mb-2">No Servers Available</h3>
-              <p className="text-gray-400">Contact admin to add servers</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {availableServers.map((server, idx) => (
-                <ServerCard key={server.id} server={server} index={idx} />
-              ))}
-            </div>
-          )}
+          ) : (() => {
+            // Ensure availableServers is an array
+            const serversToDisplay = Array.isArray(availableServers) ? availableServers : []
+            
+            if (serversToDisplay.length === 0) {
+              return (
+                <div className="text-center py-16">
+                  <Server className="w-16 h-16 text-gray-600 mx-auto mb-4 opacity-50" />
+                  <h3 className="text-xl font-semibold text-white mb-2">No Servers Available</h3>
+                  <p className="text-gray-400">
+                    {isAdmin ? 'Create a server' : 'Contact admin for available servers'}
+                  </p>
+                </div>
+              )
+            }
+
+            // Check if metrics are still loading - if we have servers but no metrics yet, show loading
+            const metricsLoaded = Object.keys(adminServerMetrics).length > 0
+            if (!metricsLoaded && !isAdmin) {
+              return (
+                <div className="text-center py-16">
+                  <p className="text-gray-400">Checking server status...</p>
+                </div>
+              )
+            }
+
+            // Filter: for admin show all, for users show only connected servers
+            const filteredServers = serversToDisplay.filter(server => {
+              if (isAdmin) return true
+              // For users: only show connected servers (cpu !== null)
+              const isConnected = (adminServerMetrics[server.id]?.cpu ?? null) !== null
+              return isConnected
+            })
+            
+            if (filteredServers.length === 0) {
+              return (
+                <div className="text-center py-16">
+                  <Server className="w-16 h-16 text-gray-600 mx-auto mb-4 opacity-50" />
+                  <h3 className="text-xl font-semibold text-white mb-2">No Active Servers</h3>
+                  <p className="text-gray-400">No servers are currently online</p>
+                </div>
+              )
+            }
+
+            return (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredServers.map((server, idx) => (
+                  <ServerCard key={server.id} server={server} index={idx} />
+                ))}
+              </div>
+            )
+          })()}
 
           {/* Chart Modal */}
           {showChartModal && (
@@ -1458,20 +1651,54 @@ export default function ServerStore() {
             <div className="mt-16 border-t border-gray-700 pt-8">
               <h2 className="text-2xl font-bold text-white mb-6">Your Active Subscriptions</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {myServers.map((server) => (
-                  <div key={server.id} className="bg-green-500/10 border border-green-500/30 rounded-xl p-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <h3 className="text-lg font-bold text-white">{server.name}</h3>
-                      <span className="text-xs bg-green-500/20 text-green-400 px-2 py-1 rounded">
-                        Active
-                      </span>
+                {myServers.map((server) => {
+                  const isConnected = (adminServerMetrics[server.id]?.cpu ?? null) !== null
+                  const expirationDate = new Date(server.expiration_date)
+                  const now = new Date()
+                  const daysUntilExpiration = Math.ceil((expirationDate - now) / (1000 * 60 * 60 * 24))
+                  const isExpiringSoon = daysUntilExpiration <= 7 && daysUntilExpiration > 0
+
+                  return (
+                    <div key={server.id} className={`${isConnected ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'} border rounded-xl p-6`}>
+                      <div className="flex items-start justify-between mb-4">
+                        <h3 className="text-lg font-bold text-white">{server.name}</h3>
+                        <span className={`text-xs px-2 py-1 rounded ${
+                          isConnected 
+                            ? 'bg-green-500/20 text-green-400' 
+                            : 'bg-red-500/20 text-red-400'
+                        }`}>
+                          {isConnected ? '✓ Hoạt động' : '✗ Không kết nối'}
+                        </span>
+                      </div>
+                      
+                      {!isConnected && (
+                        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4">
+                          <p className="text-xs text-red-300">
+                            <strong>⚠️ Cảnh báo:</strong> Server này hiện không có kết nối. Vui lòng liên hệ với admin.
+                          </p>
+                        </div>
+                      )}
+
+                      {isExpiringSoon && (
+                        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
+                          <p className="text-xs text-yellow-300">
+                            <strong>⏰ Sắp hết hạn:</strong> Subscription hết hạn sau {daysUntilExpiration} ngày.
+                          </p>
+                        </div>
+                      )}
+                      
+                      <p className="text-gray-400 text-sm mb-4">{server.specs}</p>
+                      <div className="space-y-2 text-sm text-gray-500">
+                        <p>
+                          Subscribed since: {new Date(server.subscribed_at).toLocaleDateString()}
+                        </p>
+                        <p className="text-neon-cyan font-semibold">
+                          Expires: {expirationDate.toLocaleDateString()} ({daysUntilExpiration > 0 ? daysUntilExpiration + ' ngày còn lại' : 'Đã hết hạn'})
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-gray-400 text-sm mb-4">{server.specs}</p>
-                    <p className="text-sm text-gray-500">
-                      Subscribed since: {new Date(server.subscribed_at).toLocaleDateString()}
-                    </p>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
@@ -1534,6 +1761,160 @@ export default function ServerStore() {
           )}
         </>
       )}
+
+      {/* Subscription Duration Modal */}
+      {showDurationModal && selectedServerForDuration && (() => {
+        const selectedServer = allServers.find(s => s.id === selectedServerForDuration)
+        if (!selectedServer) return null
+        
+        const pricePerMonth = (selectedServer.price_per_hour || 0) * 730
+        
+        const getDiscountedPrice = (months) => {
+          const discounts = { 1: 0, 3: 0.1, 6: 0.2, 12: 0.3 }
+          const discount = discounts[months] || 0
+          const totalPrice = pricePerMonth * months
+          return {
+            originalPrice: totalPrice,
+            discount: discount * 100,
+            finalPrice: totalPrice * (1 - discount)
+          }
+        }
+
+        return (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+            <div className="bg-dark-800 border border-neon-cyan/40 rounded-xl p-8 max-w-md w-full mx-4">
+              <h2 className="text-2xl font-bold text-neon-cyan mb-2">Select Subscription Duration</h2>
+              <p className="text-gray-400 mb-6">Price: <span className="text-neon-yellow font-semibold">${pricePerMonth.toFixed(2)}</span>/month</p>
+
+              <div className="space-y-3 mb-8">
+                {[
+                  { months: 1, label: '1 Month' },
+                  { months: 3, label: '3 Months' },
+                  { months: 6, label: '6 Months' },
+                  { months: 12, label: '1 Year' }
+                ].map((option) => {
+                  const { finalPrice, discount } = getDiscountedPrice(option.months)
+                  return (
+                    <button
+                      key={option.months}
+                      onClick={() => setSelectedDuration(option.months)}
+                      className={`w-full p-4 rounded-lg border-2 transition-all text-left ${
+                        selectedDuration === option.months
+                          ? 'border-neon-cyan bg-neon-cyan/10'
+                          : 'border-gray-700 bg-dark-900 hover:border-gray-600'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-semibold text-white">{option.label}</p>
+                          <div className="flex items-center gap-3 mt-2">
+                            {discount > 0 ? (
+                              <>
+                                <p className="text-sm line-through text-gray-500">${(pricePerMonth * option.months).toFixed(2)}</p>
+                                <span className="text-xs text-white font-semibold bg-neon-red/80 px-2 py-1 rounded">
+                                  -{discount.toFixed(0)}%
+                                </span>
+                                <p className="text-lg text-neon-green font-bold">${finalPrice.toFixed(2)}</p>
+                              </>
+                            ) : (
+                              <p className="text-lg text-neon-yellow font-bold">${finalPrice.toFixed(2)}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                          selectedDuration === option.months
+                            ? 'border-neon-cyan bg-neon-cyan'
+                            : 'border-gray-600'
+                        }`}>
+                          {selectedDuration === option.months && (
+                            <div className="w-2 h-2 bg-dark-800 rounded-full"></div>
+                          )}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowDurationModal(false)}
+                  className="flex-1 px-4 py-3 rounded-lg bg-gray-700/20 text-gray-300 hover:bg-gray-700/40 transition-all font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmSubscription}
+                  className="flex-1 px-4 py-3 rounded-lg bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 hover:border-neon-cyan transition-all font-semibold"
+                >
+                  Confirm
+                </button>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Subscribers List Modal */}
+      {showSubscribersModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-dark-800 border border-neon-green/40 rounded-xl p-8 max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-2xl font-bold text-neon-green">Server Subscribers</h2>
+              <button
+                onClick={closeSubscribersModal}
+                className="text-gray-400 hover:text-white transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+
+            {loadingSubscribers ? (
+              <div className="text-center py-12">
+                <p className="text-gray-400">Loading subscribers...</p>
+              </div>
+            ) : subscribersList.length > 0 ? (
+              <div className="space-y-3">
+                {subscribersList.map((subscriber, index) => (
+                  <div key={index} className="bg-dark-900 border border-gray-700/50 rounded-lg p-4 hover:border-neon-green/50 transition-all">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <p className="font-semibold text-white">{subscriber.username}</p>
+                        <p className="text-sm text-gray-400">{subscriber.email}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs text-gray-500 mb-1">Subscribed</p>
+                        <p className="text-sm text-neon-green font-semibold">
+                          {new Date(subscriber.subscribed_at).toLocaleDateString('vi-VN')}
+                        </p>
+                      </div>
+                    </div>
+                    {subscriber.expiration_date && (
+                      <div className="mt-3 pt-3 border-t border-gray-700/50">
+                        <p className="text-xs text-gray-500">Expires: <span className="text-neon-yellow">{new Date(subscriber.expiration_date).toLocaleDateString('vi-VN')}</span></p>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center py-12">
+                <p className="text-gray-400">Không có subscriber nào</p>
+              </div>
+            )}
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                onClick={closeSubscribersModal}
+                className="px-6 py-2 rounded-lg bg-gray-700/20 text-gray-300 hover:bg-gray-700/40 transition-all font-semibold"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

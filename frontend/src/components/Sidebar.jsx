@@ -6,8 +6,6 @@ import { useDevices } from '../context/DeviceContext'
 export default function Sidebar({ activeMenu, setActiveMenu, health }) {
   const { user, logout } = useAuth()
   const { iotDevices, selectedIoTDevice, setSelectedIoTDevice, myServers, selectedServer, setSelectedServer } = useDevices()
-  const [expandIoT, setExpandIoT] = useState(true)
-  const [expandServers, setExpandServers] = useState(true)
 
   const commonMenuItems = user?.role === 'admin'
     ? [
@@ -88,84 +86,6 @@ export default function Sidebar({ activeMenu, setActiveMenu, health }) {
           )
         })}
       </nav>
-
-      {/* ========== IoT DEVICES SECTION ========== */}
-      {iotDevices && iotDevices.length > 0 && (
-        <div className="mb-6 pb-6 border-b border-gray-700">
-          <button
-            onClick={() => setExpandIoT(!expandIoT)}
-            className="w-full flex items-center justify-between px-4 py-3 rounded-lg hover:bg-dark-700 transition-all"
-          >
-            <div className="flex items-center gap-2 text-neon-cyan">
-              <Thermometer className="w-4 h-4" />
-              <span className="font-bold text-sm">IoT Devices ({iotDevices.length})</span>
-            </div>
-            <ChevronDown
-              className={`w-4 h-4 transition-transform ${expandIoT ? 'rotate-180' : ''}`}
-            />
-          </button>
-
-          {expandIoT && (
-            <div className="mt-2 space-y-2 ml-2">
-              {iotDevices.map((device) => (
-                <button
-                  key={device.id}
-                  onClick={() => setSelectedIoTDevice(device.id)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-sm ${
-                    selectedIoTDevice === device.id
-                      ? 'bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40'
-                      : 'text-gray-400 hover:text-gray-200 hover:bg-dark-700'
-                  }`}
-                  title={device.location || 'No location'}
-                >
-                  {getDeviceIcon(device.device_type)}
-                  <span className="flex-1 text-left truncate">{device.name}</span>
-                  <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ========== RENTED SERVERS SECTION ========== */}
-      {myServers && myServers.length > 0 && (
-        <div className="mb-6 pb-6 border-b border-gray-700">
-          <button
-            onClick={() => setExpandServers(!expandServers)}
-            className="w-full flex items-center justify-between px-4 py-3 rounded-lg hover:bg-dark-700 transition-all"
-          >
-            <div className="flex items-center gap-2 text-neon-purple">
-              <Server className="w-4 h-4" />
-              <span className="font-bold text-sm">Servers ({myServers.length})</span>
-            </div>
-            <ChevronDown
-              className={`w-4 h-4 transition-transform ${expandServers ? 'rotate-180' : ''}`}
-            />
-          </button>
-
-          {expandServers && (
-            <div className="mt-2 space-y-2 ml-2">
-              {myServers.map((server) => (
-                <button
-                  key={server.id}
-                  onClick={() => setSelectedServer(server.id)}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg transition-all text-sm ${
-                    selectedServer === server.id
-                      ? 'bg-neon-purple/20 text-neon-purple border border-neon-purple/40'
-                      : 'text-gray-400 hover:text-gray-200 hover:bg-dark-700'
-                  }`}
-                  title={server.specs || 'No specs'}
-                >
-                  <Server className="w-4 h-4" />
-                  <span className="flex-1 text-left truncate">{server.name}</span>
-                  <span className="w-2 h-2 bg-blue-500 rounded-full"></span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* No Devices Warning */}
       {(!iotDevices || iotDevices.length === 0) && (!myServers || myServers.length === 0) && user?.role !== 'admin' && (

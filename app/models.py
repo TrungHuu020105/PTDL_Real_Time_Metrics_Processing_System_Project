@@ -141,10 +141,12 @@ class ServerSubscription(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False, index=True)  # Subscriber
     server_id = Column(Integer, nullable=False, index=True)  # Server being subscribed to
+    subscription_duration_months = Column(Integer, nullable=False, default=1)  # Duration in months (1, 3, 6, 12)
     subscribed_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
+    expiration_date = Column(DateTime, nullable=False)  # When subscription expires
 
     def __repr__(self):
-        return f"<ServerSubscription(user_id={self.user_id}, server_id={self.server_id})>"
+        return f"<ServerSubscription(user_id={self.user_id}, server_id={self.server_id}, expires={self.expiration_date})>"
 
 
 class ServerSubscriptionRequest(Base):
@@ -154,6 +156,7 @@ class ServerSubscriptionRequest(Base):
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, nullable=False, index=True)  # User requesting
     server_id = Column(Integer, nullable=False, index=True)  # Server requested
+    subscription_duration_months = Column(Integer, nullable=False, default=1)  # Requested duration in months (1, 3, 6, 12)
     status = Column(String(20), default="pending", nullable=False)  # pending, approved, rejected
     requested_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
     approved_by = Column(Integer, nullable=True)  # Admin ID who approved
@@ -161,4 +164,4 @@ class ServerSubscriptionRequest(Base):
     rejection_reason = Column(String(255), nullable=True)  # Reason for rejection
 
     def __repr__(self):
-        return f"<ServerSubscriptionRequest(user_id={self.user_id}, server_id={self.server_id}, status={self.status})>"
+        return f"<ServerSubscriptionRequest(user_id={self.user_id}, server_id={self.server_id}, duration={self.subscription_duration_months}m, status={self.status})>"

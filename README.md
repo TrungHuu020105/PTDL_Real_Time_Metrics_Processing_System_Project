@@ -15,8 +15,8 @@ Giải pháp hoàn chỉnh để theo dõi cảm biến IoT thời gian thực v
 
 | Thứ Tự | Tên | MSSV |
 |--------|-----|------|
-| 1 | Huỳnh Nhật Hào | 23663871 |
-| 2 | Lê Trung Hữu | 23666491 |
+| 1 | Lê Trung Hữu | 23666491 |
+| 2 | Huỳnh Nhật Hào | 23663871 |
 | 3 | Phan Gia Huy | 23674141 |
 | 4 | Trần Quốc Huy | 23637731 |
 

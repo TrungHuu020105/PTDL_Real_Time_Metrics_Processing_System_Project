@@ -148,23 +148,26 @@ export function DeviceProvider({ children }) {
   const fetchAvailableServers = async () => {
     try {
       const response = await api.get('/api/servers')
-      setAvailableServers(response.data.servers || [])
+      console.log('[DeviceContext] Fetched available servers:', response.data?.servers)
+      setAvailableServers(response?.data?.servers || [])
     } catch (err) {
       console.error('Failed to fetch available servers:', err)
+      setAvailableServers([])
     }
   }
 
   const fetchMyServers = async () => {
     try {
       const response = await api.get('/api/servers/my-subscriptions')
-      setMyServers(response.data.servers || [])
+      setMyServers(response?.data?.servers || [])
       
       // Auto-select first server
-      if (response.data.servers?.length > 0 && !selectedServer) {
+      if (response?.data?.servers?.length > 0 && !selectedServer) {
         setSelectedServer(response.data.servers[0].id)
       }
     } catch (err) {
       console.error('Failed to fetch my servers:', err)
+      setMyServers([])
     }
   }
 

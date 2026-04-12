@@ -415,52 +415,58 @@ def get_user_accessible_sources(db: Session, user_id: int) -> List[str]:
     """Get list of metric sources (device sources) the user has access to"""
     sources = []
     
-    # Admin users can see all devices
     user = get_user_by_id(db, user_id)
+    
     if user and user.role == "admin":
-        # Admins see all active Device sources
+        # Admins see ALL devices (no restrictions)
         devices = db.query(Device).filter(Device.is_active == True).all()
         sources.extend([d.source for d in devices])
         
-        # Admins see all active IoT device sources
         iot_devices = db.query(IoTDevice).filter(IoTDevice.is_active == True).all()
         sources.extend([d.source for d in iot_devices])
 
-        # Admins also see any source that already has metrics (covers remote agents)
         metric_sources = db.query(Metric.source).distinct().all()
         sources.extend([row[0] for row in metric_sources if row and row[0]])
     else:
         # Regular users see:
-        # 1. Devices they have permission for (from UserDevicePermission)
-        devices = get_user_devices(db, user_id)
-        sources.extend([d.source for d in devices])
+        # 1. System monitor (Server 1) - public
+        sources.append("system_monitor")
         
-        # 2. IoT devices they own
-        iot_devices = db.query(IoTDevice).filter(
-            IoTDevice.user_id == user_id,
-            IoTDevice.is_active == True
-        ).all()
+        # 2. Devices they CREATED themselves
+        user_devices = db.query(Device).filter(Device.created_by == user_id).all()
+        sources.extend([d.source for d in user_devices])
+        
+        # 3. IoT devices they own
+        iot_devices = db.query(IoTDevice).filter(IoTDevice.user_id == user_id).all()
         sources.extend([d.source for d in iot_devices])
 
-        # 3. Sources for servers they are subscribed to (server_{id} convention)
+        # 4. Server subscriptions (not needed for metrics, but keeping for compatibility)
         subscriptions = db.query(ServerSubscription).filter(
             ServerSubscription.user_id == user_id
         ).all()
         for sub in subscriptions:
             sources.append(f"server_{sub.server_id}")
-            if sub.server_id == 1:
-                sources.append("system_monitor")
 
     # Keep order while removing duplicates
     return list(dict.fromkeys(sources))
 
 
 def get_latest_metrics_for_user(db: Session, user_id: int, source: Optional[str] = None) -> tuple:
-    """Get latest values for each metric type, filtered by user's accessible devices"""
+    """Get latest values for each metric type, filtered by user's accessible devices
+    
+    Returns None if metric is older than 30 seconds (server considered down)
+    """
+    from datetime import datetime, timezone, timedelta
+    
     accessible_sources = get_user_accessible_sources(db, user_id)
     
     if not accessible_sources:
         return None, None
+    
+    # Check if metric is fresh (within last 30 seconds)
+    vietnam_tz = timezone(timedelta(hours=7))
+    now = datetime.now(vietnam_tz)
+    stale_threshold = now - timedelta(seconds=30)
     
     if source:
         if source not in accessible_sources:
@@ -468,22 +474,26 @@ def get_latest_metrics_for_user(db: Session, user_id: int, source: Optional[str]
 
         latest_cpu = db.query(Metric).filter(
             Metric.metric_type == "cpu",
-            Metric.source == source
+            Metric.source == source,
+            Metric.timestamp >= stale_threshold  # Only return if recent
         ).order_by(Metric.timestamp.desc()).first()
 
         latest_memory = db.query(Metric).filter(
             Metric.metric_type == "memory",
-            Metric.source == source
+            Metric.source == source,
+            Metric.timestamp >= stale_threshold  # Only return if recent
         ).order_by(Metric.timestamp.desc()).first()
     else:
         latest_cpu = db.query(Metric).filter(
             Metric.metric_type == "cpu",
-            Metric.source.in_(accessible_sources)
+            Metric.source.in_(accessible_sources),
+            Metric.timestamp >= stale_threshold  # Only return if recent
         ).order_by(Metric.timestamp.desc()).first()
 
         latest_memory = db.query(Metric).filter(
             Metric.metric_type == "memory",
-            Metric.source.in_(accessible_sources)
+            Metric.source.in_(accessible_sources),
+            Metric.timestamp >= stale_threshold  # Only return if recent
         ).order_by(Metric.timestamp.desc()).first()
     
     return latest_cpu, latest_memory
@@ -526,7 +536,7 @@ def get_metrics_history_for_user(
 
 # ============== SERVER SUBSCRIPTION REQUESTS ==============
 
-def create_subscription_request(db: Session, user_id: int, server_id: int) -> ServerSubscriptionRequest:
+def create_subscription_request(db: Session, user_id: int, server_id: int, subscription_duration_months: int = 1) -> ServerSubscriptionRequest:
     """User creates a subscription request for a server"""
     # Check if request already pending
     existing = db.query(ServerSubscriptionRequest).filter(
@@ -541,6 +551,7 @@ def create_subscription_request(db: Session, user_id: int, server_id: int) -> Se
     request = ServerSubscriptionRequest(
         user_id=user_id,
         server_id=server_id,
+        subscription_duration_months=subscription_duration_months,
         status="pending"
     )
     db.add(request)
@@ -557,7 +568,7 @@ def get_pending_subscription_requests(db: Session) -> List[ServerSubscriptionReq
 
 
 def approve_subscription_request(db: Session, request_id: int, admin_id: int) -> Optional[ServerSubscriptionRequest]:
-    """Admin approves a subscription request - creates subscription"""
+    """Admin approves a subscription request - creates subscription with expiration date"""
     from app.models import ServerSubscription
     
     req = db.query(ServerSubscriptionRequest).filter(ServerSubscriptionRequest.id == request_id).first()
@@ -571,10 +582,16 @@ def approve_subscription_request(db: Session, request_id: int, admin_id: int) ->
     req.approved_by = admin_id
     req.approved_at = datetime.now(vietnam_tz)
     
-    # Create subscription
+    # Calculate expiration date based on subscription duration
+    now = datetime.now(vietnam_tz)
+    expiration_date = now + timedelta(days=req.subscription_duration_months * 30)  # Approximate: 1 month = 30 days
+    
+    # Create subscription with expiration date
     subscription = ServerSubscription(
         user_id=req.user_id,
-        server_id=req.server_id
+        server_id=req.server_id,
+        subscription_duration_months=req.subscription_duration_months,
+        expiration_date=expiration_date
     )
     db.add(subscription)
     db.commit()

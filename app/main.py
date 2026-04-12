@@ -106,7 +106,7 @@ async def startup_event():
                     device_type=demo_device["device_type"],
                     source=demo_device["source"],
                     location=demo_device["location"],
-                    is_active=True,
+                    is_active=False,  # IMPORTANT: Demo devices disabled by default - admin must enable to generate metrics
                     created_by=admin_user.id
                 )
                 db.add(device)
@@ -121,7 +121,7 @@ async def startup_event():
                 )
                 db.add(permission)
                 db.commit()
-                print(f"[OK] [Startup] Created demo device: {demo_device['name']}")
+                print(f"[OK] [Startup] Created demo device: {demo_device['name']} (Status: DISABLED - admin can enable via toggle)")
             
     except Exception as e:
         print(f"[ERROR] [Startup Error] {str(e)}")

@@ -14,6 +14,8 @@ export default function IoTMetrics() {
   const [loading, setLoading] = useState(true)
   const [accessDenied, setAccessDenied] = useState(false)
   const lastAlertRef = useRef(null)
+  const wsRef = useRef(null)
+  const realtimeDataRef = useRef({}) // Store realtime data from WebSocket
 
   const iotMetrics = {
     temperature: { label: '🌡️ Temperature', unit: '°C', color: '#ff6b6b', min: 15, max: 35 },
@@ -29,7 +31,26 @@ export default function IoTMetrics() {
       const [historyRes] = await Promise.all([
         api.get(`/api/metrics/history?metric_type=${metricType}&minutes=120`)
       ])
-      const metrics = historyRes.data.data || []
+      let metrics = historyRes.data.data || []
+      
+      // Combine with realtime data from WebSocket
+      if (realtimeDataRef.current[metricType]) {
+        const realtimeMetrics = realtimeDataRef.current[metricType].map(d => ({
+          value: d.value,
+          timestamp: d.timestamp.toISOString()
+        }))
+        // Add realtime data that's not already in history
+        metrics = [...metrics, ...realtimeMetrics]
+        // Remove duplicates and sort by timestamp
+        const uniqueMetrics = {}
+        metrics.forEach(m => {
+          const key = `${m.value}_${m.timestamp}`
+          uniqueMetrics[key] = m
+        })
+        metrics = Object.values(uniqueMetrics).sort((a, b) => 
+          new Date(a.timestamp) - new Date(b.timestamp)
+        )
+      }
       
       // Set current to latest value
       if (metrics.length > 0) {
@@ -107,6 +128,77 @@ export default function IoTMetrics() {
   useEffect(() => {
     const interval = setInterval(fetchData, 3000)
     return () => clearInterval(interval)
+  }, [metricType])
+
+  // Connect to WebSocket for realtime IoT data
+  useEffect(() => {
+    const connectWebSocket = () => {
+      try {
+        const serverUrl = import.meta.env.VITE_SERVER_IP || 'localhost'
+        const serverPort = import.meta.env.VITE_SERVER_PORT || '8000'
+        const clientId = `frontend_metrics_${Date.now()}`
+        const wsUrl = `ws://${serverUrl}:${serverPort}/api/ws/${clientId}`
+        
+        console.log('[IoTMetrics] Connecting to WebSocket:', wsUrl)
+        wsRef.current = new WebSocket(wsUrl)
+        
+        wsRef.current.onopen = () => {
+          console.log('[IoTMetrics] WebSocket connected')
+        }
+        
+        wsRef.current.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            console.log('[IoTMetrics] Received WebSocket message:', message)
+            
+            // Handle realtime IoT metric broadcasts
+            if (message.type === 'iot_metric' && message.metric_type && message.value !== undefined) {
+              // Store realtime data by metric_type
+              if (!realtimeDataRef.current[message.metric_type]) {
+                realtimeDataRef.current[message.metric_type] = []
+              }
+              realtimeDataRef.current[message.metric_type].push({
+                value: message.value,
+                timestamp: new Date(message.timestamp || Date.now())
+              })
+              
+              // Keep only last 120 minutes of data
+              const twoHoursMs = 120 * 60 * 1000
+              realtimeDataRef.current[message.metric_type] = realtimeDataRef.current[message.metric_type].filter(
+                d => Date.now() - d.timestamp.getTime() < twoHoursMs
+              )
+              
+              // Update current value if it matches current metric type
+              if (message.metric_type === metricType) {
+                setCurrent(message.value)
+                console.log(`[IoTMetrics] Updated ${metricType} to ${message.value}`)
+              }
+            }
+          } catch (err) {
+            console.error('[IoTMetrics] Failed to parse WebSocket data:', err)
+          }
+        }
+        
+        wsRef.current.onerror = (error) => {
+          console.error('[IoTMetrics] WebSocket error:', error)
+        }
+        
+        wsRef.current.onclose = () => {
+          console.log('[IoTMetrics] WebSocket disconnected, reconnecting...')
+          setTimeout(connectWebSocket, 3000)
+        }
+      } catch (err) {
+        console.error('[IoTMetrics] Failed to connect WebSocket:', err)
+      }
+    }
+    
+    connectWebSocket()
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
   }, [metricType])
 
   const currentMetric = iotMetrics[metricType]

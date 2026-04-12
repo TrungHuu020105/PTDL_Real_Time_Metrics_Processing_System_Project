@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from app.database import get_db
-from app.models import IoTDevice, User
+from app.models import IoTDevice, User, Device, UserDevicePermission
 from app.api.routes_auth import get_current_user
 from app import crud
 
@@ -29,36 +29,80 @@ async def create_iot_device(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Create a new IoT device - User owned"""
-    # Check if source already exists
-    existing = db.query(IoTDevice).filter(IoTDevice.source == device_data.source).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Source '{device_data.source}' already exists"
+    """Create a new IoT device - User owned. Also registers in Device table for metric generation."""
+    try:
+        # Check if source already exists in IoTDevice (user-owned table only)
+        # Don't check Device table - that's internal for metric generation
+        existing_iot = db.query(IoTDevice).filter(IoTDevice.source == device_data.source).first()
+        
+        if existing_iot:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"You already have a device with source '{device_data.source}'. Each sensor can only be used once per user."
+            )
+        
+        # Step 1: Create IoTDevice (user-owned view)
+        print(f"[DEBUG] Creating IoTDevice: {device_data.name} by user {user.id}")
+        iot_device = IoTDevice(
+            user_id=user.id,
+            name=device_data.name,
+            device_type=device_data.device_type,
+            source=device_data.source,
+            location=device_data.location,
+            is_active=True
         )
-    
-    device = IoTDevice(
-        user_id=user.id,
-        name=device_data.name,
-        device_type=device_data.device_type,
-        source=device_data.source,
-        location=device_data.location,
-        is_active=True
-    )
-    db.add(device)
-    db.commit()
-    db.refresh(device)
-    
-    return {
-        "id": device.id,
-        "name": device.name,
-        "device_type": device.device_type,
-        "source": device.source,
-        "location": device.location,
-        "is_active": device.is_active,
-        "created_at": device.created_at
-    }
+        db.add(iot_device)
+        db.commit()
+        db.refresh(iot_device)
+        print(f"[OK] IoTDevice created: {iot_device.id}")
+        
+        # Step 2: Create Device record with is_active=True for metric generation
+        print(f"[DEBUG] Creating Device for metrics: {device_data.source}")
+        device = Device(
+            name=device_data.name,
+            device_type=device_data.device_type,
+            source=device_data.source,
+            location=device_data.location,
+            is_active=True,  # Enable metrics generation immediately
+            created_by=user.id
+        )
+        db.add(device)
+        db.commit()
+        db.refresh(device)
+        print(f"[OK] Device created: {device.id} with is_active=True")
+        
+        # Step 3: Grant user permission to view this device
+        print(f"[DEBUG] Creating UserDevicePermission")
+        permission = UserDevicePermission(
+            user_id=user.id,
+            device_id=device.id,
+            granted_by=user.id
+        )
+        db.add(permission)
+        db.commit()
+        print(f"[OK] Permission granted")
+        
+        return {
+            "id": iot_device.id,
+            "name": iot_device.name,
+            "device_type": iot_device.device_type,
+            "source": iot_device.source,
+            "location": iot_device.location,
+            "is_active": iot_device.is_active,
+            "created_at": iot_device.created_at,
+            "message": "✅ Device created successfully. Metric generation started immediately!"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] Failed to create device: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create device: {str(e)}"
+        )
 
 
 @router.get("")
@@ -134,7 +178,7 @@ async def delete_iot_device(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Delete IoT device - Only owner can delete"""
+    """Delete IoT device - Only owner can delete. Also deletes corresponding Device record."""
     device = db.query(IoTDevice).filter(
         IoTDevice.id == device_id,
         IoTDevice.user_id == user.id
@@ -146,7 +190,14 @@ async def delete_iot_device(
             detail="Device not found"
         )
     
+    # Also delete corresponding Device record (for metric generation)
+    admin_device = db.query(Device).filter(Device.source == device.source).first()
+    if admin_device:
+        # Delete associated permissions
+        db.query(UserDevicePermission).filter(UserDevicePermission.device_id == admin_device.id).delete()
+        db.delete(admin_device)
+    
     db.delete(device)
     db.commit()
     
-    return {"message": "Device deleted successfully"}
+    return {"message": "Device and its metrics deleted successfully"}

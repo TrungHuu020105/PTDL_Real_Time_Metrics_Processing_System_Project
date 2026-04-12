@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Plus, Trash2, Edit2, Home, Radio, X, Power, PowerOff } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useDevices } from '../context/DeviceContext'
@@ -14,6 +14,37 @@ export default function IoTDeviceManager() {
   // Use allIoTDevices if admin, otherwise use iotDevices
   const displayDevices = isAdmin ? allIoTDevices : iotDevices
   
+  // ADMIN: State for admin summary view
+  const [adminSummary, setAdminSummary] = useState({
+    users_summary: [],
+    total_devices: 0,
+    total_users: 0
+  })
+  
+  // ADMIN: Fetch admin summary data
+  useEffect(() => {
+    if (isAdmin) {
+      const fetchAdminSummary = async () => {
+        try {
+          const response = await api.get('/api/admin/iot-devices/users-summary')
+          setAdminSummary(response.data)
+          console.log('Admin summary fetched:', response.data)
+        } catch (error) {
+          console.error('Failed to fetch admin summary:', error)
+          setAdminSummary({
+            users_summary: [],
+            total_devices: 0,
+            total_users: 0
+          })
+        }
+      }
+      fetchAdminSummary()
+      // Refresh every 10 seconds
+      const interval = setInterval(fetchAdminSummary, 10000)
+      return () => clearInterval(interval)
+    }
+  }, [isAdmin])
+  
   // Debug log
   useEffect(() => {
     console.log('IoTDeviceManager - user:', user)
@@ -22,6 +53,7 @@ export default function IoTDeviceManager() {
     console.log('IoTDeviceManager - allIoTDevices:', allIoTDevices)
     console.log('IoTDeviceManager - displayDevices:', displayDevices)
   }, [isAdmin, iotDevices, allIoTDevices, displayDevices])
+  const wsRef = useRef(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
   const [showChartModal, setShowChartModal] = useState(false)
@@ -128,6 +160,74 @@ export default function IoTDeviceManager() {
     fetchLatestMetrics()
     const interval = setInterval(fetchLatestMetrics, 5000)
     return () => clearInterval(interval)
+  }, [displayDevices])
+
+  // Connect to WebSocket for realtime IoT data updates
+  useEffect(() => {
+    const connectWebSocket = () => {
+      try {
+        const serverUrl = import.meta.env.VITE_SERVER_IP || 'localhost'
+        const serverPort = import.meta.env.VITE_SERVER_PORT || '8000'
+        const clientId = `frontend_iot_${Date.now()}`
+        const wsUrl = `ws://${serverUrl}:${serverPort}/api/ws/${clientId}`
+        
+        console.log('[IoTDeviceManager] Connecting to WebSocket:', wsUrl)
+        wsRef.current = new WebSocket(wsUrl)
+        
+        wsRef.current.onopen = () => {
+          console.log('[IoTDeviceManager] WebSocket connected for realtime updates')
+        }
+        
+        wsRef.current.onmessage = (event) => {
+          try {
+            const message = JSON.parse(event.data)
+            console.log('[IoTDeviceManager] Received WebSocket message:', message)
+            
+            // Handle realtime IoT metric broadcasts
+            if (message.type === 'iot_metric' && message.metric_type && message.value !== undefined) {
+              setLatestMetrics(prev => {
+                const updated = { ...prev }
+                // Find device by type and update it
+                displayDevices.forEach(device => {
+                  if (device.device_type === message.metric_type) {
+                    updated[device.id] = {
+                      value: message.value,
+                      timestamp: message.timestamp
+                    }
+                  }
+                })
+                return updated
+              })
+            }
+          } catch (err) {
+            console.error('[IoTDeviceManager] Failed to parse WebSocket data:', err)
+          }
+        }
+        
+        wsRef.current.onerror = (event) => {
+          console.error('[IoTDeviceManager] WebSocket error:', event)
+          console.error('[IoTDeviceManager] WebSocket error type:', event.type)
+          console.error('[IoTDeviceManager] WebSocket ready state:', wsRef.current?.readyState)
+          // 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
+          console.error('[IoTDeviceManager] Error connecting to:', wsUrl)
+        }
+        
+        wsRef.current.onclose = () => {
+          console.log('[IoTDeviceManager] WebSocket disconnected, reconnecting...')
+          setTimeout(connectWebSocket, 3000)
+        }
+      } catch (err) {
+        console.error('[IoTDeviceManager] Failed to connect WebSocket:', err)
+      }
+    }
+    
+    connectWebSocket()
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close()
+      }
+    }
   }, [displayDevices])
 
   // Helper function to aggregate data by minute (1 point per minute)
@@ -308,6 +408,45 @@ export default function IoTDeviceManager() {
     }
   }
 
+  // Toggle device active/inactive status (for admin - Device model)
+  const toggleDeviceActive = async (deviceId) => {
+    try {
+      setLoading(true)
+      const response = await api.put(`/api/admin/devices/${deviceId}/toggle`)
+      alert(response.data.message || `Device ${response.data.is_active ? 'enabled' : 'disabled'} successfully`)
+      
+      // Refresh admin devices list
+      if (isAdmin && allIoTDevices) {
+        // Update the device in the list
+        const updatedDevices = allIoTDevices.map(d => 
+          d.id === deviceId ? { ...d, is_active: response.data.is_active } : d
+        )
+        // Note: This is a limitation - we'd need context update here
+        window.location.reload() // Force refresh for now
+      }
+    } catch (err) {
+      console.error('Error toggling device:', err)
+      alert('Error: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Toggle IoT device active/inactive (user's own devices)
+  const toggleIoTDeviceActive = async (deviceId, currentStatus) => {
+    try {
+      setLoading(true)
+      await updateIoTDevice(deviceId, { is_active: !currentStatus })
+      alert(`Device ${!currentStatus ? 'enabled' : 'disabled'} successfully`)
+      // Devices list will auto-update via context
+    } catch (err) {
+      console.error('Error toggling IoT device:', err)
+      alert('Error: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // Admin functions
   const disconnectIoTDevice = async (deviceId) => {
     try {
@@ -406,7 +545,7 @@ export default function IoTDeviceManager() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700">
-                {displayDevices?.users_summary?.map((item) => (
+                {adminSummary?.users_summary?.map((item) => (
                   <tr key={item.user_id} className="hover:bg-slate-700/50 transition">
                     <td className="px-6 py-3 text-white font-medium">{item.username}</td>
                     <td className="px-6 py-3 text-gray-400">{item.email}</td>
@@ -419,7 +558,7 @@ export default function IoTDeviceManager() {
                 ))}
               </tbody>
             </table>
-            {!displayDevices?.users_summary || displayDevices.users_summary.length === 0 && (
+            {!adminSummary?.users_summary || adminSummary.users_summary.length === 0 && (
               <div className="text-center py-8 text-gray-400">No users with devices</div>
             )}
           </div>
@@ -427,11 +566,11 @@ export default function IoTDeviceManager() {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 bg-slate-700/50 rounded-lg">
               <p className="text-gray-300 text-sm">Total Devices</p>
-              <p className="text-cyan-400 font-bold text-2xl">{displayDevices?.total_devices || 0}</p>
+              <p className="text-cyan-400 font-bold text-2xl">{adminSummary?.total_devices || 0}</p>
             </div>
             <div className="p-4 bg-slate-700/50 rounded-lg">
               <p className="text-gray-300 text-sm">Total Users</p>
-              <p className="text-cyan-400 font-bold text-2xl">{displayDevices?.total_users || 0}</p>
+              <p className="text-cyan-400 font-bold text-2xl">{adminSummary?.total_users || 0}</p>
             </div>
           </div>
         </>
@@ -512,6 +651,19 @@ export default function IoTDeviceManager() {
                     <span className={`text-xs ${device.is_active ? 'text-green-400' : 'text-red-400'}`}>
                       {device.is_active ? 'Active' : 'Inactive'}
                     </span>
+                    {isAdmin && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          toggleDeviceActive(device.id)
+                        }}
+                        className="ml-auto flex items-center gap-1 px-2 py-1 bg-yellow-500/20 text-yellow-400 rounded hover:bg-yellow-500/30 transition-all text-xs"
+                        title={device.is_active ? 'Disable metric generation' : 'Enable metric generation'}
+                      >
+                        {device.is_active ? <PowerOff className="w-3 h-3" /> : <Power className="w-3 h-3" />}
+                        {device.is_active ? 'Disable' : 'Enable'}
+                      </button>
+                    )}
                   </div>
 
                   <div className="flex flex-col gap-2">

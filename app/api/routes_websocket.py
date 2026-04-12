@@ -56,24 +56,6 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
     WebSocket endpoint để client kết nối và gửi metrics.
     
     Endpoint: ws://SERVER_IP:8000/api/ws/{client_id}
-    
-    Hỗ trợ 2 loại metrics:
-    
-    1. System Metrics (CPU/RAM):
-    {
-        "cpu": 45.5,
-        "ram": 72.3,
-        "timestamp": "2024-04-06T10:30:00"
-    }
-    
-    2. IoT Sensor Metrics:
-    {
-        "metric_type": "temperature",
-        "value": 24.5,
-        "source": "sensor_1",
-        "unit": "°C",
-        "timestamp": "2024-04-06T10:30:00"
-    }
     """
     try:
         # Kết nối client
@@ -97,6 +79,18 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         manager.save_metrics(client_id, metrics.model_dump())
                         # DEBUG: Print received saved flag
                         print(f"[DEBUG] Received: {metrics.metric_type} | saved={metrics.saved}")
+                        
+                        # REALTIME BROADCAST: Send to all connected clients immediately
+                        realtime_broadcast = {
+                            "type": "iot_metric",
+                            "metric_type": metrics.metric_type,
+                            "value": metrics.value,
+                            "source": metrics.source,
+                            "timestamp": metrics.timestamp or datetime.now().isoformat(),
+                            "saved": metrics.saved
+                        }
+                        await manager.broadcast(json.dumps(realtime_broadcast))
+                        
                         # Save to database - but only if "saved" flag is True
                         save_iot_metric_to_db(
                             metrics.metric_type, 

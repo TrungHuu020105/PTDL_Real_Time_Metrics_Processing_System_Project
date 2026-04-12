@@ -262,15 +262,56 @@ class IoTDataGenerator:
     def __init__(self):
         self.state_manager = StateManager()
         self.initialized = False
+        self.active_sensors = []  # Only active sensors
+        self.run_count = 0  # Track runs for periodic re-check
     
     def initialize(self):
-        """Initialize all sensors"""
+        """Initialize sensors from database (only active devices)"""
         init_db()
+        db = SessionLocal()
+        try:
+            # Clear previous sensors when re-initializing
+            self.active_sensors = []
+            self.state_manager.states = {}
+            
+            # Query only active devices from database
+            from app.models import Device
+            active_devices = db.query(Device).filter(Device.is_active == True).all()
+            
+            if not active_devices:
+                print("[INFO] No active devices found. Data generation disabled until admin enables sensors.")
+            else:
+                # Map devices to configs based on source
+                active_devices_to_use = []
+                for device in active_devices:
+                    # Find matching config by source
+                    matching_config = None
+                    for config in SENSORS:
+                        if config.source == device.source:
+                            matching_config = config
+                            break
+                    
+                    if matching_config:
+                        active_devices_to_use.append(matching_config)
+                        print(f"[OK] Loaded active device: {device.name} ({device.source})")
+                    else:
+                        print(f"[WARNING] Device {device.name} ({device.source}) not in SENSORS config, skipping")
+                
+                # Initialize only active sensors
+                for config in active_devices_to_use:
+                    initial_value = random.uniform(config.min_value, config.max_value)
+                    initial_value = round(initial_value, 2)
+                    self.state_manager.initialize(config, initial_value)
+                    self.active_sensors.append(config)
+                
+                print(f"[OK] Initialized {len(self.active_sensors)} active sensors for data generation")
         
-        for config in SENSORS:
-            initial_value = random.uniform(config.min_value, config.max_value)
-            initial_value = round(initial_value, 2)
-            self.state_manager.initialize(config, initial_value)
+        except Exception as e:
+            print(f"[ERROR] Failed to initialize from DB: {str(e)}")
+            print("[INFO] Data generation disabled - no active sensors")
+            self.active_sensors = []
+        finally:
+            db.close()
         
         self.initialized = True
     
@@ -293,6 +334,32 @@ class IoTDataGenerator:
         if not self.initialized:
             self.initialize()
         
+        # Periodic re-check: every 2 runs, verify if new active devices were added (10 seconds)
+        self.run_count += 1
+        if self.run_count % 2 == 0:
+            print(f"[DEBUG] Periodic check (run #{self.run_count})... checking for new active devices")
+            from app.database import SessionLocal
+            from app.models import Device
+            db = SessionLocal()
+            try:
+                current_active_count = db.query(Device).filter(Device.is_active == True).count()
+                if current_active_count > len(self.active_sensors):
+                    print(f"[INFO] Detected new active devices! ({current_active_count} vs {len(self.active_sensors)}). Re-initializing...")
+                    self.initialize()
+            finally:
+                db.close()
+        
+        # IMPORTANT: If no active sensors, re-check database immediately
+        # (user might have disabled all devices after startup)
+        if not self.active_sensors:
+            print("[DEBUG] No active sensors, re-checking database...")
+            self.initialize()
+        
+        # Early exit if still no active sensors
+        if not self.active_sensors:
+            print("[INFO] No active sensors - skipping data generation")
+            return None
+        
         now = datetime.now(timezone(timedelta(hours=7)))
         timestamp_str = now.strftime("%Y-%m-%d %H:%M:%S")
         
@@ -300,8 +367,8 @@ class IoTDataGenerator:
         batch_log = []
         all_metrics = []  # For return when save_to_db=False (ALL data, no filtering)
         
-        # Generate 1 metric per sensor
-        for config in SENSORS:
+        # Generate 1 metric per active sensor ONLY
+        for config in self.active_sensors:
             state = self.state_manager.get_state(config.source)
             if not state:
                 continue

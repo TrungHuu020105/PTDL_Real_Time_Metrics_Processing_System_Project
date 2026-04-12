@@ -220,6 +220,7 @@ class DeviceUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     device_type: Optional[str] = Field(None, description="Type of device: cpu, memory, temperature, humidity, etc")
     location: Optional[str] = Field(None, max_length=255)
+    is_active: Optional[bool] = Field(None, description="Enable/disable metric generation for this device")
 
 
 class DeviceResponse(BaseModel):
@@ -228,6 +229,7 @@ class DeviceResponse(BaseModel):
     name: str
     device_type: str
     source: str
+    is_active: bool
     location: Optional[str] = None
     is_active: bool
     created_at: datetime

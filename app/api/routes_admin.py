@@ -162,7 +162,7 @@ async def delete_device(device_id: int, admin: User = Depends(verify_admin), db:
 
 @router.put("/devices/{device_id}", response_model=DeviceResponse)
 async def update_device(device_id: int, device_update: DeviceUpdate, admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
-    """Update device information (name, device_type, location)"""
+    """Update device information (name, device_type, location, is_active)"""
     # Get the device first to check if it exists
     db_device = crud.get_device_by_id(db, device_id)
     if not db_device:
@@ -178,11 +178,36 @@ async def update_device(device_id: int, device_update: DeviceUpdate, admin: User
         db_device.device_type = device_update.device_type
     if device_update.location is not None:
         db_device.location = device_update.location
+    if device_update.is_active is not None:
+        db_device.is_active = device_update.is_active
     
     db.commit()
     db.refresh(db_device)
     
     return db_device
+
+
+@router.put("/devices/{device_id}/toggle")
+async def toggle_device_active(device_id: int, admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
+    """Toggle device is_active status (enable/disable metric generation)"""
+    db_device = crud.get_device_by_id(db, device_id)
+    if not db_device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Device not found"
+        )
+    
+    db_device.is_active = not db_device.is_active
+    db.commit()
+    db.refresh(db_device)
+    
+    status_str = "enabled" if db_device.is_active else "disabled"
+    return {
+        "id": db_device.id,
+        "name": db_device.name,
+        "is_active": db_device.is_active,
+        "message": f"Device {status_str} successfully. Metric generation will {'' if db_device.is_active else 'not '}continue."
+    }
 
 
 
@@ -279,7 +304,30 @@ async def get_device_users(device_id: int, admin: User = Depends(verify_admin), 
 
 @router.get("/iot-devices")
 async def get_all_iot_devices(admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
-    """Admin: Get device COUNT per user (NOT device details)"""
+    """Admin: Get all IoT devices (for device management UI)"""
+    devices = db.query(IoTDevice).all()
+    
+    return {
+        "devices": [
+            {
+                "id": d.id,
+                "user_id": d.user_id,
+                "name": d.name,
+                "device_type": d.device_type,
+                "source": d.source,
+                "location": d.location,
+                "is_active": d.is_active,
+                "created_at": d.created_at
+            }
+            for d in devices
+        ],
+        "count": len(devices)
+    }
+
+
+@router.get("/iot-devices/users-summary")
+async def get_iot_devices_summary(admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
+    """Admin: Get device COUNT per user (for admin dashboard)"""
     from sqlalchemy import func
     
     # Get device count grouped by user

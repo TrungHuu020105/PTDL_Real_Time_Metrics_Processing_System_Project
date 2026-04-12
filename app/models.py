@@ -109,6 +109,12 @@ class IoTDevice(Base):
     source = Column(String(100), unique=True, nullable=False, index=True)  # Unique identifier for metrics
     location = Column(String(255), nullable=True)  # Physical location
     is_active = Column(Boolean, default=True, nullable=False)
+    
+    # Alert threshold fields - upper and lower bounds
+    alert_enabled = Column(Boolean, default=False, nullable=False)  # Enable/disable alerts for this device
+    lower_threshold = Column(Float, nullable=True)  # Lower threshold (values below this trigger alert)
+    upper_threshold = Column(Float, nullable=True)  # Upper threshold (values above this trigger alert)
+    
     created_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
 
     def __repr__(self):

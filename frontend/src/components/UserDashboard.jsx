@@ -1,75 +1,115 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw, AlertTriangle, AlertCircle, CheckCircle, Server, Plus } from 'lucide-react'
+import { Thermometer, Server, Plus, Calendar, TrendingUp } from 'lucide-react'
 import { useDevices } from '../context/DeviceContext'
-import GaugeChart from './GaugeChart'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import AddDeviceModal from './AddDeviceModal'
 import api from '../api'
 
 export default function UserDashboard() {
-  const { iotDevices: devices, selectedIoTDevice: selectedDevice, setSelectedIoTDevice: setSelectedDevice, createIoTDevice } = useDevices()
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [lastUpdate, setLastUpdate] = useState(new Date())
-  const [alerts, setAlerts] = useState([])
+  const { iotDevices: devices, myServers: servers, createIoTDevice } = useDevices()
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
   const [addingDevice, setAddingDevice] = useState(false)
+  const [selectedDeviceId, setSelectedDeviceId] = useState(null)
+  const [fromDate, setFromDate] = useState(() => {
+    // Default to today (1-day view = hourly data)
+    return new Date().toISOString().split('T')[0]
+  })
+  const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0])
+  const [chartData, setChartData] = useState([])
+  const [loading, setLoading] = useState(false)
 
-  const currentDevice = devices?.find(d => d.id === selectedDevice)
+  const selectedDevice = devices?.find(d => d.id === selectedDeviceId) || devices?.[0]
 
-  // Fetch data for selected device
   useEffect(() => {
-    if (!selectedDevice || !currentDevice) return
+    if (devices?.length > 0 && !selectedDeviceId) {
+      setSelectedDeviceId(devices[0].id)
+    }
+  }, [devices])
+
+  // Fetch and aggregate data
+  useEffect(() => {
+    if (!selectedDevice) return
 
     const fetchData = async () => {
       try {
         setLoading(true)
-        const source = currentDevice.source
-
-        // Fetch metrics for this device
-        const [latestRes, historyRes] = await Promise.all([
-          api.get(`/api/metrics/latest?source=${source}`),
-          api.get(`/api/metrics/history?metric_type=${currentDevice.device_type}&source=${source}&minutes=120`)
-        ])
-
-        setData({
-          latest: latestRes.data,
-          history: historyRes.data?.data || []
+        console.log(`[UserDashboard] Fetching data for ${selectedDevice.name} from ${fromDate} to ${toDate}`)
+        
+        const response = await api.get('/api/metrics/history-by-date', {
+          params: {
+            metric_type: selectedDevice.device_type,
+            source: selectedDevice.source,
+            from_date: fromDate,
+            to_date: toDate
+          }
         })
-        setLastUpdate(new Date())
+
+        const metrics = response.data.data || []
+        console.log(`[UserDashboard] Received ${metrics.length} metrics from API`)
+
+        // Calculate days difference
+        const from = new Date(fromDate)
+        const to = new Date(toDate)
+        const daysDiff = Math.ceil((to - from) / (1000 * 60 * 60 * 24)) + 1
+
+        console.log(`[UserDashboard] Date range: ${daysDiff} days, showHourly=${daysDiff === 1}`)
+
+        if (daysDiff === 1) {
+          // Show hourly data
+          console.log(`[UserDashboard] Aggregating into hourly buckets`)
+          const hourlyData = {}
+          metrics.forEach(m => {
+            const d = new Date(m.timestamp)
+            const hour = d.getHours().toString().padStart(2, '0')
+            const key = `${hour}:00`
+            if (!hourlyData[key]) {
+              hourlyData[key] = { values: [], hour: key }
+            }
+            hourlyData[key].values.push(m.value)
+          })
+
+          const data = Object.values(hourlyData)
+            .sort((a, b) => a.hour.localeCompare(b.hour))
+            .map(h => ({
+              time: h.hour,
+              value: parseFloat((h.values.reduce((a, b) => a + b, 0) / h.values.length).toFixed(2))
+            }))
+          console.log(`[UserDashboard] Hourly data points: ${data.length}`)
+          setChartData(data)
+        } else {
+          // Show daily data
+          console.log(`[UserDashboard] Aggregating into daily buckets`)
+          const dailyData = {}
+          metrics.forEach(m => {
+            const d = new Date(m.timestamp)
+            const key = d.toISOString().split('T')[0]
+            if (!dailyData[key]) {
+              dailyData[key] = { values: [], date: key }
+            }
+            dailyData[key].values.push(m.value)
+          })
+
+          const data = Object.values(dailyData)
+            .sort((a, b) => a.date.localeCompare(b.date))
+            .map(d => ({
+              time: d.date,
+              value: parseFloat((d.values.reduce((a, b) => a + b, 0) / d.values.length).toFixed(2))
+            }))
+          console.log(`[UserDashboard] Daily data points: ${data.length}`)
+          setChartData(data)
+        }
       } catch (err) {
-        console.error('Failed to fetch device data:', err)
+        console.error('Failed to fetch chart data:', err)
+        console.error('Error details:', err.response?.data || err.message)
+        setChartData([])
       } finally {
         setLoading(false)
       }
     }
 
     fetchData()
-    const interval = setInterval(fetchData, 5000) // Refresh every 5s
-    return () => clearInterval(interval)
-  }, [selectedDevice, currentDevice])
+  }, [selectedDevice, fromDate, toDate])
 
-  const formatTime = (date) => {
-    return date.toLocaleTimeString('vi-VN')
-  }
-
-  const formatValue = (value) => {
-    return typeof value === 'number' ? value.toFixed(2) : 'N/A'
-  }
-
-  const getDeviceTypeLabel = (type) => {
-    const labels = {
-      cpu: 'CPU Usage',
-      memory: 'Memory Usage',
-      temperature: 'Temperature',
-      humidity: 'Humidity',
-      soil_moisture: 'Soil Moisture',
-      light_intensity: 'Light Intensity',
-      pressure: 'Pressure'
-    }
-    return labels[type] || type
-  }
-
-  // Handle adding new device
   const handleAddDevice = async (deviceData) => {
     try {
       setAddingDevice(true)
@@ -83,184 +123,177 @@ export default function UserDashboard() {
     }
   }
 
-  // No devices state
-  if (!devices || devices.length === 0) {
-    return (
-      <div className="min-h-screen bg-dark-900 p-8 flex items-center justify-center">
-        <div className="text-center max-w-md">
-          <div className="bg-dark-800 border border-yellow-500/30 rounded-xl p-12 mb-6">
-            <Server className="w-16 h-16 text-yellow-400 mx-auto mb-4 opacity-50" />
-            <h2 className="text-2xl font-bold text-white mb-4">No Devices Yet</h2>
-            <p className="text-gray-400 mb-6">
-              You haven't added any IoT devices yet. Create your first device by entering the sensor code and device details below.
-            </p>
-            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4 mb-6">
-              <p className="text-sm text-yellow-400">
-                💡 You can add IoT sensors like temperature, humidity, soil moisture, light intensity, or pressure sensors.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowAddDeviceModal(true)}
-              className="w-full px-6 py-3 bg-neon-cyan/20 border border-neon-cyan/60 rounded-lg text-neon-cyan font-semibold hover:bg-neon-cyan/30 transition-colors flex items-center justify-center gap-2"
-            >
-              <Plus className="w-5 h-5" />
-              Add Your First Device
-            </button>
-          </div>
-        </div>
-
-        <AddDeviceModal
-          isOpen={showAddDeviceModal}
-          onClose={() => setShowAddDeviceModal(false)}
-          onAdd={handleAddDevice}
-          isLoading={addingDevice}
-        />
-      </div>
-    )
-  }
-
-  // Device not selected
-  if (!currentDevice || !selectedDevice) {
-    return (
-      <div className="min-h-screen bg-dark-900 p-8 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-gray-400 text-lg">Please select a device from the sidebar</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="p-8 space-y-8">
+    <div className="min-h-screen bg-dark-900 p-8">
       {/* Header */}
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-4xl font-bold text-white mb-2">{currentDevice.name}</h1>
-          <div className="flex items-center gap-4 text-gray-400">
-            <span className="flex items-center gap-2">
-              <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-              {getDeviceTypeLabel(currentDevice.device_type)}
-            </span>
-            {currentDevice.location && <span>📍 {currentDevice.location}</span>}
-            <span className="text-sm text-gray-500">Source: {currentDevice.source}</span>
-          </div>
-        </div>
-        <div className="text-right">
-          <p className="text-sm text-gray-400 mb-1">Last updated</p>
-          <p className="text-lg text-neon-cyan font-mono">{formatTime(lastUpdate)}</p>
-        </div>
+      <div className="mb-8">
+        <h1 className="text-4xl font-bold text-white mb-2">Dashboard</h1>
+        <p className="text-gray-400">Overview of your IoT devices and servers</p>
       </div>
 
-      {/* Device Selector */}
-      <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-6">
-        <div className="flex justify-between items-center mb-4">
-          <h3 className="text-lg font-semibold text-white">Available Devices</h3>
+      {/* Stats Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8 max-w-2xl">
+        {/* IoT Devices Card */}
+        <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-8 hover:border-neon-cyan/40 transition-all">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">IoT Devices</h2>
+            <Thermometer className="w-6 h-6 text-neon-cyan" />
+          </div>
+          <p className="text-5xl font-bold text-neon-cyan mb-4">{devices?.length || 0}</p>
+          <p className="text-sm text-gray-400 mb-4">
+            {devices?.length === 0 
+              ? 'No devices created yet' 
+              : devices?.length === 1
+              ? '1 device connected'
+              : `${devices?.length} devices connected`}
+          </p>
           <button
             onClick={() => setShowAddDeviceModal(true)}
-            className="px-3 py-1 bg-neon-cyan/20 border border-neon-cyan/60 rounded-lg text-neon-cyan text-sm hover:bg-neon-cyan/30 transition-colors flex items-center gap-1"
+            className="w-full px-4 py-2 bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 rounded-lg hover:bg-neon-cyan/30 transition-all flex items-center justify-center gap-2 text-sm"
           >
             <Plus className="w-4 h-4" />
             Add Device
           </button>
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-          {devices.map(device => (
-            <button
-              key={device.id}
-              onClick={() => setSelectedDevice(device.id)}
-              className={`p-4 rounded-lg transition-all text-left border ${
-                selectedDevice === device.id
-                  ? 'bg-neon-cyan/20 border-neon-cyan/60 text-neon-cyan'
-                  : 'bg-dark-900 border-gray-700 text-gray-400 hover:border-neon-cyan/40'
-              }`}
-            >
-              <p className="font-semibold text-sm">{device.name}</p>
-              <p className="text-xs mt-1 opacity-75">{device.device_type}</p>
-            </button>
-          ))}
+
+        {/* Servers Card */}
+        <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-8 hover:border-neon-cyan/40 transition-all">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">Servers</h2>
+            <Server className="w-6 h-6 text-neon-cyan" />
+          </div>
+          <p className="text-5xl font-bold text-neon-cyan mb-4">{servers?.length || 0}</p>
+          <p className="text-sm text-gray-400 mb-4">
+            {servers?.length === 0 
+              ? 'No servers subscribed' 
+              : servers?.length === 1
+              ? '1 server subscribed'
+              : `${servers?.length} servers subscribed`}
+          </p>
+          <button
+            className="w-full px-4 py-2 bg-gray-700/50 text-gray-400 border border-gray-600 rounded-lg hover:bg-gray-700 transition-all text-sm cursor-not-allowed opacity-50"
+            disabled
+          >
+            Server Store
+          </button>
         </div>
       </div>
 
+      {/* Charts Section */}
+      {devices && devices.length > 0 && (
+        <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-8">
+          <div className="mb-6">
+            <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-2">
+              <TrendingUp className="w-6 h-6 text-neon-cyan" />
+              Sensor Data Analysis
+            </h2>
+
+            {/* Filters */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+              {/* Sensor Selector */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Select Sensor</label>
+                <select
+                  value={selectedDeviceId || ''}
+                  onChange={(e) => setSelectedDeviceId(parseInt(e.target.value))}
+                  className="w-full bg-dark-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-neon-cyan outline-none"
+                >
+                  {devices.map(device => (
+                    <option key={device.id} value={device.id}>
+                      {device.name} ({device.device_type})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* From Date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">From Date</label>
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-gray-400" />
+                  <input
+                    type="date"
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    className="w-full bg-dark-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-neon-cyan outline-none"
+                  />
+                </div>
+              </div>
+
+              {/* To Date */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">To Date</label>
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-gray-400" />
+                  <input
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    className="w-full bg-dark-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-neon-cyan outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Chart */}
+            {loading ? (
+              <div className="h-96 flex items-center justify-center text-gray-400">
+                Loading chart data...
+              </div>
+            ) : chartData.length > 0 ? (
+              <div className="h-96 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#333" />
+                    <XAxis 
+                      dataKey="time" 
+                      stroke="#999"
+                      tick={{ fontSize: 12 }}
+                    />
+                    <YAxis 
+                      stroke="#999"
+                      tick={{ fontSize: 12 }}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #0f3460' }}
+                      labelStyle={{ color: '#00d4ff' }}
+                    />
+                    <Legend />
+                    <Line
+                      type="monotone"
+                      dataKey="value"
+                      stroke="#00d4ff"
+                      strokeWidth={2}
+                      dot={{ fill: '#00d4ff', r: 4 }}
+                      activeDot={{ r: 6 }}
+                      name={`${selectedDevice?.name} (${selectedDevice?.device_type})`}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div className="h-96 flex items-center justify-center text-gray-400">
+                No data available for the selected date range
+              </div>
+            )}
+
+            {/* Info */}
+            <div className="mt-4 p-3 bg-neon-cyan/10 border border-neon-cyan/30 rounded-lg">
+              <p className="text-xs text-neon-cyan">
+                💡 Select 1 day to see hourly averages, or 2+ days to see daily averages
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal */}
       <AddDeviceModal
         isOpen={showAddDeviceModal}
         onClose={() => setShowAddDeviceModal(false)}
         onAdd={handleAddDevice}
         isLoading={addingDevice}
       />
-
-      {/* Data Display */}
-      {loading ? (
-        <div className="flex justify-center py-12">
-          <div className="text-gray-400 flex items-center gap-2">
-            <RefreshCw className="w-5 h-5 animate-spin" />
-            Loading data...
-          </div>
-        </div>
-      ) : data ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Current Value */}
-          <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-8">
-            <h3 className="text-xl font-semibold text-white mb-6">Current Value</h3>
-            <div className="text-center">
-              <p className="text-6xl font-bold text-neon-cyan mb-2">
-                {data.latest?.value ? formatValue(data.latest.value) : 'N/A'}
-              </p>
-              <p className="text-gray-400">
-                {getDeviceTypeLabel(currentDevice.device_type)}
-              </p>
-              {data.latest?.timestamp && (
-                <p className="text-sm text-gray-500 mt-4">
-                  at {new Date(data.latest.timestamp).toLocaleTimeString('vi-VN')}
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Gauge Chart */}
-          <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-8">
-            <h3 className="text-xl font-semibold text-white mb-6">Recent Trend</h3>
-            {data.history && data.history.length > 0 ? (
-              <GaugeChart data={data.history} />
-            ) : (
-              <p className="text-gray-400 text-center py-8">No data available</p>
-            )}
-          </div>
-        </div>
-      ) : (
-        <div className="bg-dark-800 border border-yellow-500/20 rounded-xl p-8 text-center">
-          <AlertCircle className="w-8 h-8 text-yellow-400 mx-auto mb-3" />
-          <p className="text-gray-400">No data available for this device</p>
-        </div>
-      )}
-
-      {/* Recent Metrics */}
-      {data?.history && data.history.length > 0 && (
-        <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-8">
-          <h3 className="text-xl font-semibold text-white mb-6">Recent Metrics (Last 120 minutes)</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="text-left py-3 text-gray-400">Time</th>
-                  <th className="text-right py-3 text-gray-400">Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.history.slice(-10).reverse().map((metric, idx) => (
-                  <tr key={idx} className="border-b border-gray-700 hover:bg-dark-900 transition-all">
-                    <td className="py-3 text-gray-300">
-                      {new Date(metric.timestamp).toLocaleTimeString('vi-VN')}
-                    </td>
-                    <td className="text-right text-neon-cyan font-mono">
-                      {formatValue(metric.value)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

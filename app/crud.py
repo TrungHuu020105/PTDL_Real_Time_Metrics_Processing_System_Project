@@ -3,6 +3,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from app.models import Metric, Alert, User, Device, UserDevicePermission, IoTDevice, ServerSubscriptionRequest, ServerSubscription
 from app.schemas import MetricCreate, AlertCreate, UserRegister, DeviceCreate
 
@@ -529,6 +530,53 @@ def get_metrics_history_for_user(
             Metric.metric_type == metric_type,
             Metric.source.in_(accessible_sources),
             Metric.timestamp >= time_threshold
+        ).order_by(Metric.timestamp.asc()).all()
+    
+    return metrics
+
+
+def get_metrics_history_by_date(
+    db: Session,
+    user_id: int,
+    metric_type: str,
+    from_date: datetime,
+    to_date: datetime,
+    source: Optional[str] = None
+) -> List[Metric]:
+    """Get historical metrics for a date range, filtered by user's accessible devices"""
+    accessible_sources = get_user_accessible_sources(db, user_id)
+    
+    if not accessible_sources:
+        return []
+    
+    # Convert dates to strings in YYYY-MM-DD format
+    if isinstance(from_date, datetime):
+        from_date_str = from_date.strftime('%Y-%m-%d')
+    else:
+        from_date_str = from_date
+    
+    if isinstance(to_date, datetime):
+        to_date_str = to_date.strftime('%Y-%m-%d')
+    else:
+        to_date_str = to_date
+    
+    if source:
+        if source not in accessible_sources:
+            return []
+
+        # Use strftime for date comparison since SQLite stores timestamps as strings
+        metrics = db.query(Metric).filter(
+            Metric.metric_type == metric_type,
+            Metric.source == source,
+            func.strftime('%Y-%m-%d', Metric.timestamp) >= from_date_str,
+            func.strftime('%Y-%m-%d', Metric.timestamp) <= to_date_str
+        ).order_by(Metric.timestamp.asc()).all()
+    else:
+        metrics = db.query(Metric).filter(
+            Metric.metric_type == metric_type,
+            Metric.source.in_(accessible_sources),
+            func.strftime('%Y-%m-%d', Metric.timestamp) >= from_date_str,
+            func.strftime('%Y-%m-%d', Metric.timestamp) <= to_date_str
         ).order_by(Metric.timestamp.asc()).all()
     
     return metrics

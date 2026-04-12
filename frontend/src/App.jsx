@@ -40,12 +40,10 @@ function AppContent() {
   const renderContent = () => {
     switch (activeMenu) {
       case 'dashboard':
-        // Only admin can access dashboard
+        // Admin gets AdminDashboard, users get UserDashboard
         if (user?.role === 'admin') {
           return <AdminDashboard />
         } else {
-          // Redirect users to IoT Devices instead
-          setActiveMenu('iot-devices')
           return <UserDashboard />
         }
       case 'iot-devices':

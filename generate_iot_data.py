@@ -334,17 +334,24 @@ class IoTDataGenerator:
         if not self.initialized:
             self.initialize()
         
-        # Periodic re-check: every 2 runs, verify if new active devices were added (10 seconds)
+        # Periodic re-check: every run, verify if devices were added/removed (5 seconds)
         self.run_count += 1
-        if self.run_count % 2 == 0:
-            print(f"[DEBUG] Periodic check (run #{self.run_count})... checking for new active devices")
+        if self.run_count % 1 == 0:  # Check EVERY run (5 seconds) for faster detection
+            print(f"[DEBUG] Periodic check (run #{self.run_count})... checking for active devices changes")
             from app.database import SessionLocal
             from app.models import Device
             db = SessionLocal()
             try:
                 current_active_count = db.query(Device).filter(Device.is_active == True).count()
-                if current_active_count > len(self.active_sensors):
-                    print(f"[INFO] Detected new active devices! ({current_active_count} vs {len(self.active_sensors)}). Re-initializing...")
+                current_active_sources = {d.source for d in db.query(Device).filter(Device.is_active == True).all()}
+                existing_sources = {s.source for s in self.active_sensors}
+                
+                # Re-initialize if:
+                # 1. Number of active devices changed (increased or decreased)
+                # 2. Active devices list changed (different sources)
+                if (current_active_count != len(self.active_sensors) or 
+                    current_active_sources != existing_sources):
+                    print(f"[INFO] Detected device changes! DB: {current_active_sources}, Local: {existing_sources}. Re-initializing...")
                     self.initialize()
             finally:
                 db.close()

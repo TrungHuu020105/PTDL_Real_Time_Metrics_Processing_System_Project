@@ -7,7 +7,7 @@ from app.api import routes_metrics, routes_alerts, routes_auth, routes_admin, ro
 from app.crud import delete_old_alerts, get_user_by_username, create_user
 from app.schemas import UserRegister
 from app.api.routes_auth import hash_password
-from app.models import Device, UserDevicePermission, AvailableServer
+from app.models import Device, UserDevicePermission, AvailableServer, IoTDevice
 
 # Initialize database on startup
 init_db()
@@ -122,7 +122,7 @@ async def startup_event():
                 db.add(permission)
                 db.commit()
                 print(f"[OK] [Startup] Created demo device: {demo_device['name']} (Status: DISABLED - admin can enable via toggle)")
-            
+        
     except Exception as e:
         print(f"[ERROR] [Startup Error] {str(e)}")
     finally:

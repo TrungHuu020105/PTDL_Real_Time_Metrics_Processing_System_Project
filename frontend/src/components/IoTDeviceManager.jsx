@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, Edit2, Home, Radio, X, Power, PowerOff } from 'lucide-react'
+import { Plus, Trash2, Edit2, Home, Radio, X, Power, PowerOff, AlertCircle } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useDevices } from '../context/DeviceContext'
 import { useAuth } from '../context/AuthContext'
 import AddDeviceModal from './AddDeviceModal'
+import EditAlertThresholdsModal from './EditAlertThresholdsModal'
 import api from '../api'
 
 export default function IoTDeviceManager() {
-  const { iotDevices, allIoTDevices, createIoTDevice, updateIoTDevice, deleteIoTDevice } = useDevices()
+  const { iotDevices, allIoTDevices, createIoTDevice, updateIoTDevice, deleteIoTDevice, fetchIoTDevices, fetchAllIoTDevices } = useDevices()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
   
@@ -52,12 +53,18 @@ export default function IoTDeviceManager() {
     console.log('IoTDeviceManager - iotDevices:', iotDevices)
     console.log('IoTDeviceManager - allIoTDevices:', allIoTDevices)
     console.log('IoTDeviceManager - displayDevices:', displayDevices)
+    if (displayDevices && displayDevices.length > 0) {
+      console.log('First device details:', displayDevices[0])
+      console.log('Device keys:', Object.keys(displayDevices[0]))
+    }
   }, [isAdmin, iotDevices, allIoTDevices, displayDevices])
   const wsRef = useRef(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
   const [showChartModal, setShowChartModal] = useState(false)
+  const [showAlertThresholdsModal, setShowAlertThresholdsModal] = useState(false)
   const [selectedDeviceForChart, setSelectedDeviceForChart] = useState(null)
+  const [selectedDeviceForAlert, setSelectedDeviceForAlert] = useState(null)
   const [editingId, setEditingId] = useState(null)
   const [formData, setFormData] = useState({
     name: '',
@@ -77,6 +84,7 @@ export default function IoTDeviceManager() {
   })
   const [deviceOwners, setDeviceOwners] = useState({})
   const [chartLastUpdated, setChartLastUpdated] = useState(null)
+  const [savingAlerts, setSavingAlerts] = useState(false)
 
   // Fetch owner information for all devices
   useEffect(() => {
@@ -121,6 +129,7 @@ export default function IoTDeviceManager() {
             const response = await api.get('/api/metrics/history', {
               params: {
                 metric_type: device.device_type,
+                source: device.source,
                 minutes: 5
               }
             })
@@ -494,6 +503,46 @@ export default function IoTDeviceManager() {
     setShowCreateModal(true)
   }
 
+  const openAlertThresholdsModal = (device) => {
+    setSelectedDeviceForAlert(device)
+    setShowAlertThresholdsModal(true)
+  }
+
+  const handleSaveAlertThresholds = async (thresholdData) => {
+    if (!selectedDeviceForAlert) return
+
+    try {
+      setSavingAlerts(true)
+      console.log('API URL:', api.defaults.baseURL)
+      console.log('Auth Header:', api.defaults.headers.common['Authorization'])
+      console.log('Sending threshold data:', thresholdData)
+      
+      const response = await api.put(`/api/iot-devices/${selectedDeviceForAlert.id}/alert-thresholds`, thresholdData)
+      console.log('Response received:', response.data)
+      alert('✅ ' + response.data.message)
+      setShowAlertThresholdsModal(false)
+      
+      // Refresh ALL devices to get updated threshold values
+      console.log('Refreshing device list...')
+      if (isAdmin) {
+        console.log('Admin user - fetching all devices')
+        await fetchAllIoTDevices()
+      } else {
+        console.log('Regular user - fetching my devices')
+        await fetchIoTDevices()
+      }
+      console.log('Device list refreshed successfully')
+    } catch (err) {
+      console.error('Full error object:', err)
+      console.error('Error message:', err.message)
+      console.error('Error config:', err.config)
+      console.error('Error response:', err.response)
+      alert('Error: ' + (err.response?.data?.detail || err.message || 'Unknown error'))
+    } finally {
+      setSavingAlerts(false)
+    }
+  }
+
   const getDeviceTypeColor = (type) => {
     const colors = {
       temperature: 'neon-orange',
@@ -522,6 +571,39 @@ export default function IoTDeviceManager() {
       return 'N/A'
     }
     return typeof metric.value === 'number' ? metric.value.toFixed(2) : metric.value
+  }
+
+  // Check if alert is triggered for a device
+  const checkAlertTriggered = (device) => {
+    const latestValue = latestMetrics[device.id]?.value
+    console.log(`[checkAlertTriggered] Device: ${device.name}, latestValue: ${latestValue}, alert_enabled: ${device.alert_enabled}`)
+    console.log(`[checkAlertTriggered] Thresholds - Lower: ${device.lower_threshold}, Upper: ${device.upper_threshold}`)
+    
+    // If no value, no alert
+    if (!latestValue) return { triggered: false, status: null }
+
+    // Check if thresholds are set (either alert_enabled=true OR thresholds exist)
+    const hasThresholds = (device.lower_threshold !== null && device.lower_threshold !== undefined) ||
+                          (device.upper_threshold !== null && device.upper_threshold !== undefined)
+    
+    if (!hasThresholds) return { triggered: false, status: null }
+
+    const lowerThreshold = device.lower_threshold
+    const upperThreshold = device.upper_threshold
+
+    // Check upper threshold (exceeds high limit)
+    if (upperThreshold !== null && upperThreshold !== undefined && latestValue > upperThreshold) {
+      console.log(`[checkAlertTriggered] ALERT triggered (Upper) for ${device.name}: ${latestValue} > ${upperThreshold}`)
+      return { triggered: true, status: 'upper', threshold: upperThreshold }
+    }
+
+    // Check lower threshold (falls below low limit)
+    if (lowerThreshold !== null && lowerThreshold !== undefined && latestValue < lowerThreshold) {
+      console.log(`[checkAlertTriggered] ALERT triggered (Lower) for ${device.name}: ${latestValue} < ${lowerThreshold}`)
+      return { triggered: true, status: 'lower', threshold: lowerThreshold }
+    }
+
+    return { triggered: false, status: null }
   }
 
   return (
@@ -607,11 +689,17 @@ export default function IoTDeviceManager() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {displayDevices.map(device => (
+              {displayDevices.map(device => {
+                const alertStatus = checkAlertTriggered(device)
+                const cardBorderColor = alertStatus.triggered
+                  ? 'border-red-500/60 bg-red-950/20'
+                  : 'border-neon-cyan/20 bg-dark-800'
+                
+                return (
                 <div
                   key={device.id}
                   onClick={() => handleOpenChart(device)}
-                  className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-6 hover:border-neon-cyan/60 hover:cursor-pointer transition-all hover:bg-dark-700"
+                  className={`rounded-xl p-6 hover:border-neon-cyan/60 hover:cursor-pointer transition-all hover:bg-dark-700 ${cardBorderColor}`}
                 >
                   <div className="flex items-start justify-between mb-4">
                     <div>
@@ -633,17 +721,70 @@ export default function IoTDeviceManager() {
                     </div>
                   )}
 
-                  {/* Real-time Metric Display */}
-                  <div className="bg-dark-900/50 rounded-lg p-4 mb-4 border border-neon-cyan/20">
-                    <p className="text-xs text-gray-400 mb-2">Real-time Value</p>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-2xl font-bold text-neon-cyan">
-                        {getLatestValue(device.id)}
-                      </span>
-                      <span className="text-sm text-gray-400">
-                        {getMetricUnit(device.device_type)}
-                      </span>
+                  {/* Real-time Metric Display - Integrated with Thresholds */}
+                  <div className={`rounded-lg p-4 mb-4 transition-all ${
+                    alertStatus.triggered
+                      ? 'bg-red-950/40 border-2 border-red-500/60'
+                      : 'bg-dark-900/50 border border-neon-cyan/20'
+                  }`}>
+                    {/* Sensor Value + Status */}
+                    <div className="flex items-end justify-between mb-3">
+                      <div>
+                        <p className="text-xs text-gray-400 mb-1">Real-time Value</p>
+                        <div className="flex items-baseline gap-2">
+                          <span className={`text-3xl font-bold ${
+                            alertStatus.triggered
+                              ? 'text-red-400'
+                              : 'text-neon-cyan'
+                          }`}>
+                            {getLatestValue(device.id)}
+                          </span>
+                          <span className="text-sm text-gray-400">
+                            {getMetricUnit(device.device_type)}
+                          </span>
+                        </div>
+                      </div>
+                      {alertStatus.triggered && (
+                        <div className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-red-500/30 text-red-400">
+                          🚨 OUT OF RANGE
+                        </div>
+                      )}
                     </div>
+
+                    {/* Alert Thresholds - Inline */}
+                    {((device.lower_threshold !== null && device.lower_threshold !== undefined) ||
+                      (device.upper_threshold !== null && device.upper_threshold !== undefined)) && (
+                      <div className="grid grid-cols-2 gap-2 pt-3 border-t border-gray-700/50">
+                        {device.lower_threshold !== null && device.lower_threshold !== undefined && (
+                          <div className={`rounded px-2 py-2 border text-center ${
+                            alertStatus.triggered && alertStatus.status === 'lower'
+                              ? 'bg-red-500/20 border-red-500/60'
+                              : 'bg-blue-500/10 border-blue-500/30'
+                          }`}>
+                            <p className="text-xs text-blue-400/70 font-semibold">⬇️ Min</p>
+                            <p className="text-sm font-mono text-blue-300">{
+                              typeof device.lower_threshold === 'number' 
+                                ? device.lower_threshold.toFixed(1) 
+                                : device.lower_threshold
+                            }</p>
+                          </div>
+                        )}
+                        {device.upper_threshold !== null && device.upper_threshold !== undefined && (
+                          <div className={`rounded px-2 py-2 border text-center ${
+                            alertStatus.triggered && alertStatus.status === 'upper'
+                              ? 'bg-red-500/20 border-red-500/60'
+                              : 'bg-green-500/10 border-green-500/30'
+                          }`}>
+                            <p className="text-xs text-green-400/70 font-semibold">⬆️ Max</p>
+                            <p className="text-sm font-mono text-green-300">{
+                              typeof device.upper_threshold === 'number' 
+                                ? device.upper_threshold.toFixed(1) 
+                                : device.upper_threshold
+                            }</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-2 mb-4">
@@ -672,6 +813,17 @@ export default function IoTDeviceManager() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
+                          openAlertThresholdsModal(device)
+                        }}
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-amber-500/20 text-amber-400 rounded hover:bg-amber-500/30 transition-all text-sm"
+                        title="Configure alert thresholds"
+                      >
+                        <AlertCircle className="w-4 h-4" />
+                        Alerts
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
                           startEdit(device)
                         }}
                         className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-500/20 text-blue-400 rounded hover:bg-blue-500/30 transition-all text-sm"
@@ -692,7 +844,8 @@ export default function IoTDeviceManager() {
                     </div>
                   </div>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </>
@@ -916,6 +1069,17 @@ export default function IoTDeviceManager() {
           onClose={() => setShowAddDeviceModal(false)}
           onAdd={handleAddDevice}
           isLoading={addingDevice}
+        />
+      )}
+
+      {/* Edit Alert Thresholds Modal */}
+      {!isAdmin && (
+        <EditAlertThresholdsModal
+          isOpen={showAlertThresholdsModal}
+          onClose={() => setShowAlertThresholdsModal(false)}
+          onUpdate={handleSaveAlertThresholds}
+          device={selectedDeviceForAlert}
+          isLoading={savingAlerts}
         />
       )}
     </div>

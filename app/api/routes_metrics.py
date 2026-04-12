@@ -149,6 +149,70 @@ async def get_metrics_history(
     }
 
 
+@router.get("/metrics/history-by-date", response_model=MetricsHistoryResponse)
+async def get_metrics_history_by_date(
+    metric_type: str = Query(..., description="Type of metric: cpu, memory, temperature, humidity, soil_moisture, light_intensity, pressure"),
+    from_date: str = Query(..., description="Start date (YYYY-MM-DD format)"),
+    to_date: str = Query(..., description="End date (YYYY-MM-DD format)"),
+    source: Optional[str] = Query(None, description="Optional source filter, e.g. system_monitor or server_2"),
+    server_id: Optional[int] = Query(None, ge=1, description="Optional server ID. If provided, source will default to server_{server_id}"),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get historical metrics for a date range, filtered by user's accessible devices.
+    
+    Query parameters:
+    - metric_type: Required. One of: cpu, memory, temperature, humidity, soil_moisture, light_intensity, pressure
+    - from_date: Required. Start date in YYYY-MM-DD format
+    - to_date: Required. End date in YYYY-MM-DD format
+    - source: Optional. Device source filter
+    - server_id: Optional. Server ID filter
+    
+    Returns data sorted by timestamp (ascending), suitable for chart display with aggregation.
+    Only returns metrics from devices the user has access to.
+    """
+    # Validate metric_type
+    server_types = {"cpu", "memory"}
+    iot_types = {"temperature", "humidity", "soil_moisture", "light_intensity", "pressure"}
+    allowed_types = server_types | iot_types
+    
+    if metric_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid metric_type. Must be one of {allowed_types}"
+        )
+
+    try:
+        # Parse dates
+        from_dt = datetime.fromisoformat(from_date)
+        to_dt = datetime.fromisoformat(to_date)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid date format. Use YYYY-MM-DD"
+        )
+
+    effective_source = source
+    if server_id is not None and not effective_source:
+        effective_source = "system_monitor" if server_id == 1 else f"server_{server_id}"
+
+    metrics = crud.get_metrics_history_by_date(
+        db,
+        current_user.id,
+        metric_type,
+        from_dt,
+        to_dt,
+        source=effective_source
+    )
+
+    return {
+        "metric_type": metric_type,
+        "data": metrics,
+        "count": len(metrics)
+    }
+
+
 @router.get("/metrics/summary", response_model=SummaryMetricsResponse)
 async def get_metrics_summary(
     minutes: int = Query(1, ge=1, le=1440, description="Time range in minutes (1-1440)"),

@@ -4,7 +4,7 @@
 services:
   - type: web
     name: ck-ptud-backend
-    env: python
+    runtime: python
     buildCommand: python -m pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
@@ -13,11 +13,11 @@ services:
       - key: CORS_ORIGINS
         value: "*"
 
-staticSites:
-  - name: ck-ptud-frontend
-    rootDir: frontend
-    buildCommand: npm ci && npm run build
-    publishPath: dist
+  - type: web
+    name: ck-ptud-frontend
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
     envVars:
       - key: VITE_API_BASE_URL
         value: https://ck-ptud-backend.onrender.com

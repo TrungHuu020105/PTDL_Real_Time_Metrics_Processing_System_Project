@@ -383,6 +383,42 @@ python stream_iot_data_live.py
 
 ---
 
+## Render Deploy (Backend + Frontend)
+
+Project da duoc chuan bi san cho Render bang file `render.yaml` o root.
+
+### Cach nhanh nhat (Blueprint)
+
+1. Push source code len GitHub.
+2. Vao Render -> **New +** -> **Blueprint** -> chon repository.
+3. Render se doc `render.yaml` va tao 2 services:
+   - Web Service: `ck-ptud-backend` (FastAPI)
+   - Static Site: `ck-ptud-frontend` (Vite build)
+4. Sau khi backend co URL thuc te, cap nhat env `VITE_API_BASE_URL` cua frontend neu can.
+5. Redeploy frontend sau khi cap nhat env.
+
+### Bien moi truong quan trong
+
+- Backend:
+  - `CORS_ORIGINS` (mac dinh `*`).
+  - `DATABASE_URL` (tuy chon, neu muon dung Postgres hoac SQLite custom path).
+- Frontend:
+  - `VITE_API_BASE_URL` (bat buoc cho production, vi du: `https://your-backend.onrender.com`).
+
+### Start commands dang dung
+
+- Backend: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+- Frontend build: `npm ci && npm run build`
+
+### Luu y database tren Render
+
+- Neu khong set `DATABASE_URL`, app se dung SQLite local (`metrics.db`) va du lieu co the mat khi instance bi recreate.
+- De ben vung hon:
+  - dung Render Postgres (`DATABASE_URL`), hoac
+  - dung persistent disk + SQLite path rieng (vi du `sqlite:////var/data/metrics.db`).
+
+---
+
 ## 📈 Hướng Phát Triển Tương Lai
 
 ### Phase 2: Enhanced Features

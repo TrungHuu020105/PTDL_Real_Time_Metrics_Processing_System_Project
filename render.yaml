@@ -1,0 +1,27 @@
+# Render Blueprint: deploy backend (FastAPI) + frontend (Vite static site)
+# If you rename the backend service, update VITE_API_BASE_URL accordingly.
+
+services:
+  - type: web
+    name: ck-ptud-backend
+    env: python
+    buildCommand: python -m pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: CORS_ORIGINS
+        value: "*"
+
+staticSites:
+  - name: ck-ptud-frontend
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    publishPath: dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://ck-ptud-backend.onrender.com
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

@@ -5,7 +5,7 @@ import { useDevices } from '../context/DeviceContext'
 import { useAuth } from '../context/AuthContext'
 import AddDeviceModal from './AddDeviceModal'
 import EditAlertThresholdsModal from './EditAlertThresholdsModal'
-import api from '../api'
+import api, { getWebSocketBaseUrl } from '../api'
 
 export default function IoTDeviceManager() {
   const { iotDevices, allIoTDevices, createIoTDevice, updateIoTDevice, deleteIoTDevice, fetchIoTDevices, fetchAllIoTDevices } = useDevices()
@@ -175,10 +175,8 @@ export default function IoTDeviceManager() {
   useEffect(() => {
     const connectWebSocket = () => {
       try {
-        const serverUrl = import.meta.env.VITE_SERVER_IP || 'localhost'
-        const serverPort = import.meta.env.VITE_SERVER_PORT || '8000'
         const clientId = `frontend_iot_${Date.now()}`
-        const wsUrl = `ws://${serverUrl}:${serverPort}/api/ws/${clientId}`
+        const wsUrl = `${getWebSocketBaseUrl()}/api/ws/${clientId}`
         
         console.log('[IoTDeviceManager] Connecting to WebSocket:', wsUrl)
         wsRef.current = new WebSocket(wsUrl)

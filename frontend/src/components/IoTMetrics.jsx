@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { AlertCircle, Lock } from 'lucide-react'
-import api from '../api'
+import api, { getWebSocketBaseUrl } from '../api'
 import { checkMetricAlert } from '../utils/alertUtils'
 import { saveAlert } from '../utils/alertService'
 
@@ -134,10 +134,8 @@ export default function IoTMetrics() {
   useEffect(() => {
     const connectWebSocket = () => {
       try {
-        const serverUrl = import.meta.env.VITE_SERVER_IP || 'localhost'
-        const serverPort = import.meta.env.VITE_SERVER_PORT || '8000'
         const clientId = `frontend_metrics_${Date.now()}`
-        const wsUrl = `ws://${serverUrl}:${serverPort}/api/ws/${clientId}`
+        const wsUrl = `${getWebSocketBaseUrl()}/api/ws/${clientId}`
         
         console.log('[IoTMetrics] Connecting to WebSocket:', wsUrl)
         wsRef.current = new WebSocket(wsUrl)

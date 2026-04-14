@@ -1,5 +1,6 @@
 """FastAPI application entry point"""
 
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, SessionLocal
@@ -19,11 +20,24 @@ app = FastAPI(
     version="2.0.0"
 )
 
+# Parse CORS origins from env (comma-separated) for deployment environments.
+cors_origins_raw = os.getenv("CORS_ORIGINS", "*").strip()
+if cors_origins_raw == "*":
+    cors_origins = ["*"]
+    cors_allow_credentials = False
+else:
+    cors_origins = [origin.strip() for origin in cors_origins_raw.split(",") if origin.strip()]
+    if not cors_origins:
+        cors_origins = ["*"]
+        cors_allow_credentials = False
+    else:
+        cors_allow_credentials = True
+
 # Add CORS middleware for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify allowed origins
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],

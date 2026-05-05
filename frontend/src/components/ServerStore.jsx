@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
 import { Server, Check, ShoppingCart, Zap, Cpu, Activity, X, DollarSign, AlertCircle, CheckCircle, XCircle, Edit, Copy } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useDevices } from '../context/DeviceContext'
@@ -19,11 +19,14 @@ export default function ServerStore() {
   const [userRequests, setUserRequests] = useState([])
   const [requestsLoading, setRequestsLoading] = useState(false)
   const [myRentals, setMyRentals] = useState([])
-  const [rentModal, setRentModal] = useState({ open: false, server: null, challengeId: null, code: '' })
+  const [rentModal, setRentModal] = useState({ open: false, action: 'rent', server: null, rentalId: null, challengeId: null, code: '' })
   const [rentalDetailModal, setRentalDetailModal] = useState({ open: false, rental: null })
   const [copiedKey, setCopiedKey] = useState('')
   const [rentCodeInputs, setRentCodeInputs] = useState(['', '', '', '', '', ''])
   const [rentActionLoading, setRentActionLoading] = useState(false)
+  const [rentTimeLeft, setRentTimeLeft] = useState(12)
+  const RENT_CODE_TIMEOUT_SECONDS = 12
+  const rentInputRefs = useRef([])
   
   // Admin state
   const [allServers, setAllServers] = useState([])
@@ -60,8 +63,36 @@ export default function ServerStore() {
   const [selectedServerForSubscribers, setSelectedServerForSubscribers] = useState(null)
   const [subscribersList, setSubscribersList] = useState([])
   const [loadingSubscribers, setLoadingSubscribers] = useState(false)
+  const [showRentersModal, setShowRentersModal] = useState(false)
+  const [selectedServerForRenters, setSelectedServerForRenters] = useState(null)
+  const [userViewTab, setUserViewTab] = useState('store')
 
   const isAdmin = user?.role === 'admin'
+  const VN_TIMEZONE = 'Asia/Ho_Chi_Minh'
+  const parseAsUTCIfNaive = (value) => {
+    if (!value) return new Date()
+    if (value instanceof Date) return value
+    if (typeof value === 'string') {
+      // Remote backend currently returns UTC timestamps without timezone suffix.
+      // If timezone is missing, force UTC by appending "Z".
+      const hasTimezone = /([zZ]|[+\-]\d{2}:\d{2})$/.test(value)
+      return new Date(hasTimezone ? value : `${value}Z`)
+    }
+    return new Date(value)
+  }
+  const formatVNTime = (value) => {
+    const dt = parseAsUTCIfNaive(value)
+    return dt.toLocaleTimeString('vi-VN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: VN_TIMEZONE,
+    })
+  }
+  const formatVNDate = (value) => {
+    if (!value) return '-'
+    const dt = parseAsUTCIfNaive(value)
+    return dt.toLocaleDateString('vi-VN', { timeZone: VN_TIMEZONE })
+  }
 
   useEffect(() => {
     console.log('[ServerStore] Effect triggered - isAdmin:', isAdmin, 'user:', user)
@@ -134,15 +165,13 @@ export default function ServerStore() {
       // Create map for quick lookup
       const cpuMap = {}
       cpuData.forEach(item => {
-        const time = new Date(item.timestamp)
-        const key = time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+        const key = formatVNTime(item.timestamp)
         cpuMap[key] = item.value
       })
 
       const memoryMap = {}
       memoryData.forEach(item => {
-        const time = new Date(item.timestamp)
-        const key = time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+        const key = formatVNTime(item.timestamp)
         memoryMap[key] = item.value
       })
 
@@ -276,11 +305,26 @@ export default function ServerStore() {
     setSubscribersList([])
   }
 
+  const openRentersModal = (server) => {
+    setSelectedServerForRenters(server)
+    setShowRentersModal(true)
+  }
+
+  const closeRentersModal = () => {
+    setShowRentersModal(false)
+    setSelectedServerForRenters(null)
+  }
+
+  const getRentalsForServer = (serverId) => {
+    const key = String(serverId)
+    return adminRentals.filter((r) => String(r.server_id) === key)
+  }
+
   const updateServerPrice = async (serverId, newPrice) => {
     try {
       setUpdatingServer(serverId)
-      await api.put(`/api/servers/admin/servers/${serverId}/price`, {
-        price_per_hour: parseFloat(newPrice)
+      await api.put(`/api/servers/admin/servers/${serverId}/price`, null, {
+        params: { price_per_hour: parseFloat(newPrice) }
       })
       await fetchAllServers()
       setEditingPrice(prev => {
@@ -288,7 +332,7 @@ export default function ServerStore() {
         delete newState[serverId]
         return newState
       })
-      alert(`Price updated to $${newPrice}/hour`)
+      alert(`Price updated to $${newPrice}/month`)
     } catch (err) {
       alert('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
@@ -343,8 +387,8 @@ export default function ServerStore() {
     setSelectedServerForEdit(server)
     setEditFormData({
       name: server.name,
-      specs: server.specs,
-      price_per_month: (server.price_per_hour || 0) * 730, // Convert hourly to monthly
+      specs: server.specifications || server.specs,
+      price_per_month: Number(server.price_per_month || 0),
       cpu_cores: server.cpu_cores || 0,
       ram_gb: server.ram_gb || 0,
       os_type: server.os_type || ''
@@ -370,23 +414,15 @@ export default function ServerStore() {
     try {
       setUpdatingServer(selectedServerForEdit.id)
 
-      // Display-only edit: update local UI state, do not call backend.
       const monthlyPrice = Number(editFormData.price_per_month ?? 0)
-      const pricePerHour = Number.isFinite(monthlyPrice) ? monthlyPrice / 730 : 0
-
-      setAllServers((prev) =>
-        prev.map((server) =>
-          server.id === selectedServerForEdit.id
-            ? {
-                ...server,
-                name: editFormData.name ?? server.name,
-                specs: editFormData.specs ?? server.specs,
-                price_per_hour: pricePerHour,
-              }
-            : server
-        )
-      )
-      alert('Đã cập nhật hiển thị trên giao diện (không ghi vào backend).')
+      const pricePerMonth = Number.isFinite(monthlyPrice) ? monthlyPrice : 0
+      await api.patch(`/api/servers/admin/servers/${selectedServerForEdit.id}`, {
+        name: editFormData.name,
+        specs: editFormData.specs,
+        price_per_hour: pricePerMonth
+      })
+      await fetchAllServers()
+      alert('Server metadata updated successfully.')
       closeEditModal()
     } catch (err) {
       console.error('Update error:', err)
@@ -399,6 +435,7 @@ export default function ServerStore() {
   // ===== SERVER CHART FUNCTIONS =====
   const fetchServerChart = async (serverId, serverName) => {
     setShowServerChartModal(true)
+    setSelectedServerForChart(serverName || String(serverId))
     setServerChartLoading(true)
     try {
       const historyRes = await api.get(`/api/servers/${serverId}/history`)
@@ -406,9 +443,8 @@ export default function ServerStore() {
 
       const mergedData = historyData.map((item) => {
         const ts = item.created_at || item.timestamp || item.last_updated
-        const time = ts ? new Date(ts) : new Date()
         return {
-          time: time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+          time: formatVNTime(ts || new Date().toISOString()),
           cpu: item.cpu ?? null,
           memory: item.ram ?? null
         }
@@ -435,7 +471,6 @@ export default function ServerStore() {
       }
 
       setServerChartData(mergedData)
-      setSelectedServerForChart(serverName)
     } catch (err) {
       console.error('Failed to fetch chart data:', err)
       setServerChartData([])
@@ -480,7 +515,8 @@ export default function ServerStore() {
   }
 
   const getRentalByServer = (serverId) => {
-    return myRentals.find((r) => r.server_id === serverId && r.status !== 'cancelled')
+    const key = String(serverId)
+    return myRentals.find((r) => String(r.server_id) === key && r.status !== 'cancelled')
   }
 
   const openRentModal = async (server) => {
@@ -490,7 +526,8 @@ export default function ServerStore() {
       const challengeId = response?.data?.challenge_id
       const code = response?.data?.verification_code || ''
       setRentCodeInputs(['', '', '', '', '', ''])
-      setRentModal({ open: true, server, challengeId, code })
+      setRentTimeLeft(RENT_CODE_TIMEOUT_SECONDS)
+      setRentModal({ open: true, action: 'rent', server, rentalId: null, challengeId, code })
     } catch (err) {
       alert('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
@@ -503,9 +540,30 @@ export default function ServerStore() {
     const next = [...rentCodeInputs]
     next[index] = digit
     setRentCodeInputs(next)
+    if (digit && index < 5) {
+      rentInputRefs.current[index + 1]?.focus()
+    }
   }
 
-  const confirmRentServer = async () => {
+  const handleCodeKeyDown = (index, e) => {
+    if (e.key === 'Backspace' && !rentCodeInputs[index] && index > 0) {
+      rentInputRefs.current[index - 1]?.focus()
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      if (rentCodeInputs.join('').length === 6 && !rentActionLoading) {
+        confirmCodeAction()
+      }
+    }
+  }
+
+  const closeRentModal = () => {
+    setRentModal({ open: false, action: 'rent', server: null, rentalId: null, challengeId: null, code: '' })
+    setRentCodeInputs(['', '', '', '', '', ''])
+    setRentTimeLeft(RENT_CODE_TIMEOUT_SECONDS)
+  }
+
+  const confirmCodeAction = async () => {
     const code = rentCodeInputs.join('')
     if (code.length !== 6) {
       alert('Vui lòng nhập đủ 6 chữ số')
@@ -513,64 +571,93 @@ export default function ServerStore() {
     }
     try {
       setRentActionLoading(true)
-      await api.post('/api/servers/rent/confirm', {
-        challenge_id: rentModal.challengeId,
-        code,
-      })
-      setRentModal({ open: false, server: null, challengeId: null, code: '' })
-      await fetchMyRentals()
-      alert('Thuê server thành công')
-    } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
-    } finally {
-      setRentActionLoading(false)
-    }
-  }
-
-  const cancelMyRental = async (rentalId) => {
-    try {
-      setRentActionLoading(true)
-      await api.post('/api/servers/rentals/cancel', { rental_id: rentalId })
-      await fetchMyRentals()
-      alert('Đã hủy đăng ký server')
-    } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
-    } finally {
-      setRentActionLoading(false)
-    }
-  }
-
-  const downloadPrivateKeyOnce = async (rentalId) => {
-    try {
-      const response = await api.get(`/api/servers/rentals/${rentalId}/private-key`)
-      const key = response?.data?.private_key || ''
-      const filename = response?.data?.private_key_filename || 'key.pem'
-      const blob = new Blob([key], { type: 'text/plain' })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = filename
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-      await fetchMyRentals()
-    } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
-    }
-  }
-
-  const copyToClipboard = async (text, key = '') => {
-    try {
-      await navigator.clipboard.writeText(text)
-      if (key) {
-        setCopiedKey(key)
-        setTimeout(() => setCopiedKey(''), 2000)
+      if (rentModal.action === 'rent') {
+        await api.post('/api/servers/rent/confirm', { challenge_id: rentModal.challengeId, code })
+        closeRentModal()
+        await fetchMyRentals()
+        alert('Thuê server thành công')
+      } else if (rentModal.action === 'download_key') {
+        const response = await api.post('/api/servers/rentals/private-key/confirm', {
+          challenge_id: rentModal.challengeId,
+          code,
+        })
+        const key = response?.data?.private_key || ''
+        const filename = response?.data?.private_key_filename || 'key.pem'
+        const blob = new Blob([key], { type: 'text/plain' })
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = filename
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        window.URL.revokeObjectURL(url)
+        closeRentModal()
+        await fetchMyRentals()
+        alert('Tải private key thành công')
+      } else if (rentModal.action === 'cancel_rental') {
+        await api.post('/api/servers/rentals/cancel/confirm', {
+          challenge_id: rentModal.challengeId,
+          code,
+        })
+        closeRentModal()
+        await fetchMyRentals()
+        if (isAdmin) await fetchAllRentals()
+        alert('Đã hủy đăng ký server')
       }
     } catch (err) {
-      console.error('Copy failed:', err)
+      alert('Error: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setRentActionLoading(false)
     }
   }
+
+  const requestCancelRental = async (rentalId) => {
+    try {
+      setRentActionLoading(true)
+      const response = await api.post('/api/servers/rentals/cancel/request', { rental_id: rentalId })
+      const challengeId = response?.data?.challenge_id
+      const code = response?.data?.verification_code || ''
+      setRentCodeInputs(['', '', '', '', '', ''])
+      setRentTimeLeft(RENT_CODE_TIMEOUT_SECONDS)
+      setRentModal({ open: true, action: 'cancel_rental', server: null, rentalId, challengeId, code })
+    } catch (err) {
+      alert('Error: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setRentActionLoading(false)
+    }
+  }
+
+  const requestDownloadPrivateKey = async (rentalId) => {
+    try {
+      const response = await api.post('/api/servers/rentals/private-key/request', { rental_id: rentalId })
+      const challengeId = response?.data?.challenge_id
+      const code = response?.data?.verification_code || ''
+      setRentCodeInputs(['', '', '', '', '', ''])
+      setRentTimeLeft(RENT_CODE_TIMEOUT_SECONDS)
+      setRentModal({ open: true, action: 'download_key', server: null, rentalId, challengeId, code })
+    } catch (err) {
+      alert('Error: ' + (err.response?.data?.detail || err.message))
+    }
+  }
+
+  useEffect(() => {
+    if (!rentModal.open) return
+    rentInputRefs.current[0]?.focus()
+    const timer = setInterval(() => {
+      if (rentActionLoading) return
+      setRentTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer)
+          closeRentModal()
+          alert('Mã xác nhận đã hết thời gian. Vui lòng thao tác lại.')
+          return 0
+        }
+        return prev - 1
+      })
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [rentModal.open, rentActionLoading])
 
   const handleRequestSubscription = async (serverId, durationMonths = 1) => {
     try {
@@ -598,7 +685,8 @@ export default function ServerStore() {
   }
 
   const isSubscribed = (serverId) => {
-    return myServers.some(s => s.id === serverId)
+    const key = String(serverId)
+    return myServers.some((s) => String(s.id || s.server_id) === key)
   }
 
   const handleSubscribe = (serverId) => {
@@ -628,7 +716,7 @@ export default function ServerStore() {
     const request = getRequestStatus(server.id)
     const rental = getRentalByServer(server.server_id || server.id)
     const canSeeIp = isAdmin || !!rental
-    const canOpenStatusChart = isAdmin || !!rental || (!isAdmin && server.rented)
+    const canOpenStatusChart = isAdmin || !!rental
 
     const getButtonState = () => {
       if (isAdmin) {
@@ -681,7 +769,7 @@ export default function ServerStore() {
             {canSeeIp && server.ip && (
               <p className="text-xs text-gray-500 mb-2">IP: {server.ip}</p>
             )}
-            <p className="text-gray-400 text-sm">{server.specs}</p>
+            <p className="text-gray-400 text-sm">{server.specifications || server.specs}</p>
           </div>
           {subscribed && (
             <span className="flex items-center gap-1 text-xs bg-green-500/20 text-green-400 px-3 py-1 rounded-full">
@@ -745,11 +833,11 @@ export default function ServerStore() {
 
         {/* Pricing & Button */}
         <div className="border-t border-gray-700 pt-4">
-          {server.price_per_hour ? (
+          {(server.price_per_month || 0) > 0 ? (
             <div className="mb-4">
               <p className="text-sm text-gray-500 mb-1">Monthly Price</p>
               <p className="text-2xl font-bold text-white">
-                ${(server.price_per_hour * 730).toFixed(2)}
+                ${Number(server.price_per_month || 0).toFixed(2)}
                 <span className="text-sm text-gray-400 font-normal">/month</span>
               </p>
             </div>
@@ -795,17 +883,17 @@ export default function ServerStore() {
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
-                    downloadPrivateKeyOnce(rental.rental_id)
+                    requestDownloadPrivateKey(rental.rental_id)
                   }}
                   className="px-3 py-2 rounded bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40"
                 >
-                  Tải private key (1 lần)
+                  Tải private key
                 </button>
               )}
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  cancelMyRental(rental.rental_id)
+                  requestCancelRental(rental.rental_id)
                 }}
                 className="ml-2 px-3 py-2 rounded bg-red-500/20 text-red-300 border border-red-500/40"
               >
@@ -817,6 +905,35 @@ export default function ServerStore() {
       </div>
     )
   }
+
+  const ACTIVE_RENTAL_STATUSES = ['creating', 'active', 'cancelling']
+  const activeMyRentals = myRentals.filter((r) => ACTIVE_RENTAL_STATUSES.includes(r.status))
+  const serverCatalog = [...(availableServers || []), ...(allServers || [])]
+  const serverById = Object.fromEntries(
+    serverCatalog.map((s) => [String(s.server_id || s.id), s])
+  )
+  const mySubscriptionsCount = activeMyRentals.length
+  const myMonthlyCost = activeMyRentals.reduce((sum, r) => {
+    const server = serverById[String(r.server_id)] || {}
+    return sum + Number(server.price_per_month || 0)
+  }, 0)
+  const ACTIVE_RENTAL_STATES = ['creating', 'active', 'cancelling']
+  const totalActiveSubscribers = new Set(
+    adminRentals
+      .filter((r) => ACTIVE_RENTAL_STATES.includes(r.status))
+      .map((r) => r.renter_name || r.username)
+      .filter(Boolean)
+  ).size
+  const myRentedServerCards = activeMyRentals.map((rental) => {
+    const server = serverById[String(rental.server_id)] || {}
+    return {
+      ...server,
+      id: server.id || rental.server_id,
+      server_id: server.server_id || rental.server_id,
+      name: server.display_name || rental.server_name || server.name || String(rental.server_id),
+      rented: true,
+    }
+  })
 
   const localhostServer = null
   const nonLocalServers = allServers
@@ -911,20 +1028,14 @@ export default function ServerStore() {
       {isAdmin ? (
         <>
           {/* Admin Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-6">
               <p className="text-gray-400 text-sm mb-2">Total Servers</p>
               <p className="text-3xl font-bold text-neon-cyan">{allServers.length}</p>
             </div>
-            <div className="bg-dark-800 border border-neon-green/20 rounded-xl p-6">
-              <p className="text-gray-400 text-sm mb-2">Pending Requests</p>
-              <p className="text-3xl font-bold text-neon-green">{pendingRequests.length}</p>
-            </div>
             <div className="bg-dark-800 border border-neon-purple/20 rounded-xl p-6">
               <p className="text-gray-400 text-sm mb-2">Total Subscribers</p>
-              <p className="text-3xl font-bold text-neon-purple">
-                {allServers.reduce((sum, s) => sum + (s.subscribers_count || 0), 0)}
-              </p>
+              <p className="text-3xl font-bold text-neon-purple">{totalActiveSubscribers}</p>
             </div>
           </div>
 
@@ -933,29 +1044,6 @@ export default function ServerStore() {
               <p className="text-sm text-red-300">
                 Failed to load pending requests: {pendingRequestsError}
               </p>
-            </div>
-          )}
-
-          {adminRentals.length > 0 && (
-            <div className="bg-dark-800 border border-neon-orange/30 rounded-xl p-4">
-              <h3 className="text-lg font-bold text-white mb-3">Active Rentals</h3>
-              <div className="space-y-2">
-                {adminRentals.map((r) => (
-                  <div key={r.rental_id} className="flex items-center justify-between bg-dark-900 rounded p-3">
-                    <div className="text-sm text-gray-300">
-                      <span className="text-white font-semibold">{r.server_id}</span> - {r.username} - {r.status}
-                    </div>
-                    {r.status !== 'cancelled' && (
-                      <button
-                        onClick={() => cancelMyRental(r.rental_id)}
-                        className="px-3 py-1 rounded bg-red-500/20 text-red-300 border border-red-500/40"
-                      >
-                        Hủy thuê
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
             </div>
           )}
 
@@ -1008,7 +1096,7 @@ export default function ServerStore() {
                 <div className="text-right">
                   <p className="text-xs text-gray-500 mb-1">Monthly Price</p>
                   <p className="text-xl font-bold text-neon-yellow">
-                    ${localhostServer ? (localhostServer.price_per_hour * 730).toFixed(2) : '0.00'}
+                    ${localhostServer ? Number(localhostServer.price_per_month || 0).toFixed(2) : '0.00'}
                   </p>
                 </div>
               </div>
@@ -1113,6 +1201,8 @@ export default function ServerStore() {
                   const serverRequests = getRequestsForServer(server.id)
                   const serverMetrics = adminServerMetrics[server.id] || { cpu: null, memory: null }
                   const isConnected = serverMetrics.cpu !== null
+                  const serverRentals = getRentalsForServer(server.id)
+                  const activeServerRentals = serverRentals.filter((r) => ['creating', 'active', 'cancelling'].includes(r.status))
 
                   return (
                     <div
@@ -1136,11 +1226,16 @@ export default function ServerStore() {
                         <div className="flex-1">
                           <div className="flex items-center gap-3 mb-2">
                             <h3 className="text-lg font-bold text-white">{server.name}</h3>
+                            {activeServerRentals.length > 0 && (
+                              <span className="text-xs bg-neon-green/20 text-neon-green border border-neon-green/40 px-2 py-1 rounded-full">
+                                Đang thuê: {activeServerRentals.length}
+                              </span>
+                            )}
                           </div>
                           {server.ip && (
                             <p className="text-xs text-gray-500 mb-2">IP: {server.ip}</p>
                           )}
-                          <p className="text-sm text-gray-400 mb-3">{server.specs}</p>
+                          <p className="text-sm text-gray-400 mb-3">{server.specifications || server.specs}</p>
 
                           {/* Server Info Grid */}
                           <div className="grid grid-cols-3 gap-3 mb-4">
@@ -1162,7 +1257,7 @@ export default function ServerStore() {
                         {/* Price Display on Right */}
                         <div className="text-right">
                           <p className="text-xs text-gray-500 mb-1">Monthly Price</p>
-                          <p className="text-xl font-bold text-neon-yellow">${(server.price_per_hour * 730).toFixed(2)}</p>
+                          <p className="text-xl font-bold text-neon-yellow">${Number(server.price_per_month || 0).toFixed(2)}</p>
                         </div>
                       </div>
 
@@ -1203,6 +1298,18 @@ export default function ServerStore() {
 
                       {/* Subscribers Button + Connection Status - Side by Side */}
                       <div className="flex items-center gap-3 mb-3">
+                        {serverRentals.length > 0 && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              openRentersModal(server)
+                            }}
+                            className="px-3 py-2 bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/60 rounded-lg hover:bg-neon-cyan/30 hover:border-neon-cyan transition-all font-semibold text-sm"
+                          >
+                            Người đang thuê ({activeServerRentals.length})
+                          </button>
+                        )}
+
                         {/* Subscribers Button - Compact */}
                         {(server.subscribers_count || 0) > 0 && (
                           <button
@@ -1291,7 +1398,7 @@ export default function ServerStore() {
                           <p className="text-white font-semibold">{req.user_name}</p>
                           <p className="text-xs text-gray-400">{req.user_email}</p>
                           <p className="text-xs text-gray-500 mt-1">
-                            Requested: {new Date(req.requested_at).toLocaleDateString()}
+                            Requested: {formatVNDate(req.requested_at)}
                           </p>
                         </div>
                         <span className="text-xs bg-yellow-500/20 text-yellow-400 px-2 py-1 rounded">
@@ -1572,18 +1679,41 @@ export default function ServerStore() {
             </div>
             <div className="bg-dark-800 border border-neon-green/20 rounded-xl p-6">
               <p className="text-gray-400 text-sm mb-2">My Subscriptions</p>
-              <p className="text-3xl font-bold text-neon-green">{myServers.length}</p>
+              <p className="text-3xl font-bold text-neon-green">{mySubscriptionsCount}</p>
             </div>
             <div className="bg-dark-800 border border-neon-purple/20 rounded-xl p-6">
               <p className="text-gray-400 text-sm mb-2">Monthly Cost</p>
               <p className="text-3xl font-bold text-neon-purple">
-                ${(myServers.reduce((sum, s) => sum + (s.price_per_hour || 0) * 730, 0)).toFixed(2)}
+                ${myMonthlyCost.toFixed(2)}
               </p>
             </div>
           </div>
 
+          <div className="border-b border-gray-700 flex items-center gap-8">
+            <button
+              onClick={() => setUserViewTab('store')}
+              className={`pb-3 text-xl font-semibold transition-all ${
+                userViewTab === 'store'
+                  ? 'text-neon-cyan border-b-2 border-neon-cyan'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              Cửa hàng
+            </button>
+            <button
+              onClick={() => setUserViewTab('mine')}
+              className={`pb-3 text-xl font-semibold transition-all ${
+                userViewTab === 'mine'
+                  ? 'text-neon-cyan border-b-2 border-neon-cyan'
+                  : 'text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              Server của tôi ({mySubscriptionsCount})
+            </button>
+          </div>
+
           {/* Servers Grid */}
-          {loading ? (
+          {userViewTab === 'store' && (loading ? (
             <div className="text-center py-16">
               <p className="text-gray-400">Loading servers...</p>
             </div>
@@ -1618,7 +1748,8 @@ export default function ServerStore() {
               if (isAdmin) return true
               // For users: only show connected servers (cpu !== null)
               const isConnected = (adminServerMetrics[server.id]?.cpu ?? null) !== null
-              return isConnected
+              const myRental = getRentalByServer(server.server_id || server.id)
+              return isConnected && !myRental
             })
             
             if (filteredServers.length === 0) {
@@ -1638,7 +1769,7 @@ export default function ServerStore() {
                 ))}
               </div>
             )
-          })()}
+          })())}
 
           {/* Chart Modal */}
           {showChartModal && (
@@ -1775,64 +1906,136 @@ export default function ServerStore() {
             </div>
           )}
 
-          {myServers.length > 0 && (
-            <div className="mt-16 border-t border-gray-700 pt-8">
-              <h2 className="text-2xl font-bold text-white mb-6">Your Active Subscriptions</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {myServers.map((server) => {
-                  const isConnected = (adminServerMetrics[server.id]?.cpu ?? null) !== null
-                  const expirationDate = new Date(server.expiration_date)
-                  const now = new Date()
-                  const daysUntilExpiration = Math.ceil((expirationDate - now) / (1000 * 60 * 60 * 24))
-                  const isExpiringSoon = daysUntilExpiration <= 7 && daysUntilExpiration > 0
+          {/* Server Chart Modal (for rented servers - user view) */}
+          {showServerChartModal && selectedServerForChart && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+              <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-8 max-w-4xl w-full mx-4">
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h3 className="text-2xl font-bold text-white mb-1">{selectedServerForChart}</h3>
+                    <p className="text-sm text-gray-400">Last 2 hours of system metrics</p>
+                  </div>
+                  <button
+                    onClick={closeServerChartModal}
+                    className="p-2 hover:bg-dark-700 rounded-lg transition-all"
+                  >
+                    <X className="w-6 h-6 text-gray-400" />
+                  </button>
+                </div>
 
-                  return (
-                    <div key={server.id} className={`${isConnected ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'} border rounded-xl p-6`}>
-                      <div className="flex items-start justify-between mb-4">
-                        <h3 className="text-lg font-bold text-white">{server.name}</h3>
-                        <span className={`text-xs px-2 py-1 rounded ${
-                          isConnected 
-                            ? 'bg-green-500/20 text-green-400' 
-                            : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          {isConnected ? '✓ Hoạt động' : '✗ Không kết nối'}
-                        </span>
-                      </div>
-                      
-                      {!isConnected && (
-                        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 mb-4">
-                          <p className="text-xs text-red-300">
-                            <strong>⚠️ Cảnh báo:</strong> Server này hiện không có kết nối. Vui lòng liên hệ với admin.
-                          </p>
-                        </div>
-                      )}
-
-                      {isExpiringSoon && (
-                        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4">
-                          <p className="text-xs text-yellow-300">
-                            <strong>⏰ Sắp hết hạn:</strong> Subscription hết hạn sau {daysUntilExpiration} ngày.
-                          </p>
-                        </div>
-                      )}
-                      
-                      <p className="text-gray-400 text-sm mb-4">{server.specs}</p>
-                      <div className="space-y-2 text-sm text-gray-500">
-                        <p>
-                          Subscribed since: {new Date(server.subscribed_at).toLocaleDateString()}
+                {serverChartLoading ? (
+                  <div className="flex items-center justify-center h-96">
+                    <p className="text-gray-400">Loading chart data...</p>
+                  </div>
+                ) : serverChartData.length > 0 ? (
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="bg-dark-900/50 border border-neon-yellow/30 rounded-lg p-4">
+                        <p className="text-xs text-gray-400 mb-2">CPU Average</p>
+                        <p className="text-2xl font-bold text-neon-yellow">
+                          {serverCpuStats.average}
+                          <span className="text-sm text-gray-400 ml-1">%</span>
                         </p>
-                        <p className="text-neon-cyan font-semibold">
-                          Expires: {expirationDate.toLocaleDateString()} ({daysUntilExpiration > 0 ? daysUntilExpiration + ' ngày còn lại' : 'Đã hết hạn'})
+                      </div>
+                      <div className="bg-dark-900/50 border border-neon-green/30 rounded-lg p-4">
+                        <p className="text-xs text-gray-400 mb-2">CPU Minimum</p>
+                        <p className="text-2xl font-bold text-neon-green">
+                          {serverCpuStats.min}
+                          <span className="text-sm text-gray-400 ml-1">%</span>
+                        </p>
+                      </div>
+                      <div className="bg-dark-900/50 border border-neon-orange/30 rounded-lg p-4">
+                        <p className="text-xs text-gray-400 mb-2">CPU Maximum</p>
+                        <p className="text-2xl font-bold text-neon-orange">
+                          {serverCpuStats.max}
+                          <span className="text-sm text-gray-400 ml-1">%</span>
                         </p>
                       </div>
                     </div>
-                  )
-                })}
+
+                    <div className="grid grid-cols-3 gap-4">
+                      <div className="bg-dark-900/50 border border-neon-cyan/30 rounded-lg p-4">
+                        <p className="text-xs text-gray-400 mb-2">Memory Average</p>
+                        <p className="text-2xl font-bold text-neon-cyan">
+                          {serverMemoryStats.average}
+                          <span className="text-sm text-gray-400 ml-1">%</span>
+                        </p>
+                      </div>
+                      <div className="bg-dark-900/50 border border-neon-green/30 rounded-lg p-4">
+                        <p className="text-xs text-gray-400 mb-2">Memory Minimum</p>
+                        <p className="text-2xl font-bold text-neon-green">
+                          {serverMemoryStats.min}
+                          <span className="text-sm text-gray-400 ml-1">%</span>
+                        </p>
+                      </div>
+                      <div className="bg-dark-900/50 border border-neon-orange/30 rounded-lg p-4">
+                        <p className="text-xs text-gray-400 mb-2">Memory Maximum</p>
+                        <p className="text-2xl font-bold text-neon-orange">
+                          {serverMemoryStats.max}
+                          <span className="text-sm text-gray-400 ml-1">%</span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="bg-dark-900/50 rounded-lg p-6 border border-gray-700">
+                      <ResponsiveContainer width="100%" height={400}>
+                        <LineChart data={serverChartData} margin={{ top: 5, right: 30, left: 0, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                          <XAxis dataKey="time" stroke="#9CA3AF" tick={{ fontSize: 12 }} />
+                          <YAxis stroke="#9CA3AF" tick={{ fontSize: 12 }} label={{ value: '%', angle: -90, position: 'insideLeft' }} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: '#1a1a2e',
+                              border: '1px solid #00d4ff',
+                              borderRadius: '8px',
+                            }}
+                            labelStyle={{ color: '#fff' }}
+                          />
+                          <Legend />
+                          <Line type="monotone" dataKey="cpu" stroke="#ffd700" dot={false} strokeWidth={2} name="CPU %" />
+                          <Line type="monotone" dataKey="memory" stroke="#00d4ff" dot={false} strokeWidth={2} name="Memory %" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-center h-96">
+                    <p className="text-gray-400">No data available for this period</p>
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-6">
+                  <button
+                    onClick={closeServerChartModal}
+                    className="flex-1 px-4 py-2 bg-gray-700/20 text-gray-300 rounded hover:bg-gray-700/40 transition-all"
+                  >
+                    Close
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
+          {userViewTab === 'mine' && myRentedServerCards.length > 0 && (
+            <div className="mt-10">
+              <h2 className="text-2xl font-bold text-white mb-6">Server của tôi</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {myRentedServerCards.map((server, idx) => (
+                  <ServerCard key={`${server.server_id || server.id}-mine`} server={server} index={idx} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {userViewTab === 'mine' && myRentedServerCards.length === 0 && (
+            <div className="mt-10 text-center py-16 border border-gray-700 rounded-xl bg-dark-800/40">
+              <h3 className="text-xl font-semibold text-white mb-2">Bạn chưa thuê server nào</h3>
+              <p className="text-gray-400">Chuyển qua tab Cửa hàng để chọn server cần thuê.</p>
+            </div>
+          )}
+
           {/* Subscription Requests Section */}
-          {userRequests.length > 0 && (
+          {userViewTab === 'mine' && userRequests.length > 0 && (
             <div className="mt-16 border-t border-gray-700 pt-8">
               <h2 className="text-2xl font-bold text-white mb-6">Your Subscription Requests</h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1868,12 +2071,12 @@ export default function ServerStore() {
                     <div className="space-y-2 text-sm text-gray-400">
                       <p>
                         <span className="text-gray-500">Requested:</span>{' '}
-                        {new Date(req.requested_at).toLocaleDateString()}
+                        {formatVNDate(req.requested_at)}
                       </p>
                       {req.approved_at && (
                         <p>
                           <span className="text-gray-500">Approved:</span>{' '}
-                          {new Date(req.approved_at).toLocaleDateString()}
+                          {formatVNDate(req.approved_at)}
                         </p>
                       )}
                       {req.rejection_reason && (
@@ -1894,15 +2097,43 @@ export default function ServerStore() {
       {rentModal.open && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
           <div className="bg-dark-800 border border-neon-cyan/40 rounded-xl p-8 max-w-md w-full mx-4">
-            <h2 className="text-2xl font-bold text-neon-cyan mb-2">Xác nhận thuê server</h2>
+            <h2 className="text-2xl font-bold text-neon-cyan mb-2">
+              {rentModal.action === 'rent' ? 'Xác nhận thuê server' : rentModal.action === 'download_key' ? 'Xác nhận tải private key' : 'Xác nhận hủy đăng ký'}
+            </h2>
             <p className="text-gray-400 mb-2">Mã bảo mật: <span className="text-neon-yellow font-bold">{rentModal.code}</span></p>
-            <p className="text-gray-500 mb-6">Nhập đúng 6 số để hoàn tất thuê server.</p>
+            <p className="text-gray-500 mb-6">
+              {rentModal.action === 'rent' ? 'Nhập đúng 6 số để hoàn tất thuê server.' : rentModal.action === 'download_key' ? 'Nhập đúng 6 số để tải lại private key.' : 'Nhập đúng 6 số để xác nhận hủy đăng ký server.'}
+            </p>
+            <div className="mb-4">
+              <div className="flex items-center justify-between text-xs text-gray-400 mb-2">
+                <span>Thời gian nhập mã</span>
+                <span>{rentTimeLeft}s</span>
+              </div>
+              <div className="w-full h-2 bg-dark-900 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-neon-cyan transition-all duration-1000"
+                  style={{ width: `${(rentTimeLeft / RENT_CODE_TIMEOUT_SECONDS) * 100}%` }}
+                />
+              </div>
+            </div>
             <div className="flex gap-2 mb-6">
               {rentCodeInputs.map((digit, idx) => (
                 <input
                   key={idx}
+                  ref={(el) => (rentInputRefs.current[idx] = el)}
                   value={digit}
                   onChange={(e) => handleCodeInputChange(idx, e.target.value)}
+                  onKeyDown={(e) => handleCodeKeyDown(idx, e)}
+                  onPaste={(e) => {
+                    const pasted = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6)
+                    if (!pasted) return
+                    e.preventDefault()
+                    const next = ['','','','','','']
+                    pasted.split('').forEach((ch, i) => { next[i] = ch })
+                    setRentCodeInputs(next)
+                    const nextIndex = Math.min(pasted.length, 5)
+                    rentInputRefs.current[nextIndex]?.focus()
+                  }}
                   maxLength={1}
                   className="w-10 h-12 text-center bg-dark-900 border border-neon-cyan/40 rounded text-white text-xl"
                 />
@@ -1910,14 +2141,14 @@ export default function ServerStore() {
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => setRentModal({ open: false, server: null, challengeId: null, code: '' })}
+                onClick={closeRentModal}
                 className="flex-1 px-4 py-3 rounded-lg bg-gray-700/20 text-gray-300 hover:bg-gray-700/40 transition-all font-semibold"
               >
                 Hủy
               </button>
               <button
-                onClick={confirmRentServer}
-                disabled={rentActionLoading}
+                onClick={confirmCodeAction}
+                disabled={rentActionLoading || rentCodeInputs.join('').length !== 6}
                 className="flex-1 px-4 py-3 rounded-lg bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 hover:border-neon-cyan transition-all font-semibold disabled:opacity-50"
               >
                 {rentActionLoading ? 'Đang xử lý...' : 'Xác nhận'}
@@ -2033,7 +2264,7 @@ export default function ServerStore() {
         const selectedServer = allServers.find(s => s.id === selectedServerForDuration)
         if (!selectedServer) return null
         
-        const pricePerMonth = (selectedServer.price_per_hour || 0) * 730
+        const pricePerMonth = Number(selectedServer.price_per_month || 0)
         
         const getDiscountedPrice = (months) => {
           const discounts = { 1: 0, 3: 0.1, 6: 0.2, 12: 0.3 }
@@ -2145,19 +2376,19 @@ export default function ServerStore() {
                   <div key={index} className="bg-dark-900 border border-gray-700/50 rounded-lg p-4 hover:border-neon-green/50 transition-all">
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
-                        <p className="font-semibold text-white">{subscriber.username}</p>
-                        <p className="text-sm text-gray-400">{subscriber.email}</p>
+                        <p className="font-semibold text-white">{subscriber.renter_name || subscriber.username || 'Unknown'}</p>
+                        <p className="text-sm text-gray-400">{subscriber.username || '-'}</p>
                       </div>
                       <div className="text-right">
-                        <p className="text-xs text-gray-500 mb-1">Subscribed</p>
+                        <p className="text-xs text-gray-500 mb-1">Created</p>
                         <p className="text-sm text-neon-green font-semibold">
-                          {new Date(subscriber.subscribed_at).toLocaleDateString('vi-VN')}
+                          {formatVNDate(subscriber.created_at)}
                         </p>
                       </div>
                     </div>
-                    {subscriber.expiration_date && (
+                    {subscriber.status && (
                       <div className="mt-3 pt-3 border-t border-gray-700/50">
-                        <p className="text-xs text-gray-500">Expires: <span className="text-neon-yellow">{new Date(subscriber.expiration_date).toLocaleDateString('vi-VN')}</span></p>
+                        <p className="text-xs text-gray-500">Status: <span className="text-neon-yellow">{subscriber.status}</span></p>
                       </div>
                     )}
                   </div>
@@ -2180,6 +2411,88 @@ export default function ServerStore() {
           </div>
         </div>
       )}
+
+      {/* Renters List Modal */}
+      {showRentersModal && selectedServerForRenters && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-8 max-w-3xl w-full">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-2xl font-bold text-neon-cyan">Người thuê server</h2>
+                <p className="text-sm text-gray-400 mt-1">
+                  {(() => {
+                    const rentals = getRentalsForServer(selectedServerForRenters.id)
+                    const active = rentals.filter((r) => ['creating', 'active', 'cancelling'].includes(r.status)).length
+                    return `${selectedServerForRenters.name} - Đang thuê: ${active}, Tổng lịch sử: ${rentals.length}`
+                  })()}
+                </p>
+              </div>
+              <button
+                onClick={closeRentersModal}
+                className="p-2 hover:bg-dark-700 rounded-lg transition-all"
+              >
+                <X className="w-6 h-6 text-gray-400" />
+              </button>
+            </div>
+
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {getRentalsForServer(selectedServerForRenters.id).map((rental) => (
+                <div key={rental.rental_id} className="bg-dark-900/60 border border-neon-cyan/20 rounded-lg p-4">
+                  {(() => {
+                    const renterDisplay = rental.renter_name && String(rental.renter_name).trim()
+                      ? rental.renter_name
+                      : 'Chưa có dữ liệu user thuê'
+                    return (
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <p className="text-xs text-gray-400 mt-1">User thuê: {renterDisplay}</p>
+                      <p className="text-xs text-gray-400 mt-1">Username VPS: {rental.username || '-'}</p>
+                      <p className="text-xs text-gray-500 mt-1">Created: {formatVNDate(rental.created_at)}</p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2">
+                      <span
+                        className={`text-xs px-2 py-1 rounded-full ${
+                          rental.status === 'active'
+                            ? 'bg-green-500/20 text-green-400'
+                            : rental.status === 'creating' || rental.status === 'cancelling'
+                              ? 'bg-yellow-500/20 text-yellow-400'
+                              : rental.status === 'cancelled'
+                                ? 'bg-gray-500/20 text-gray-300'
+                                : 'bg-red-500/20 text-red-300'
+                        }`}
+                      >
+                        {rental.status}
+                      </span>
+                      {['active', 'creating'].includes(rental.status) && (
+                        <button
+                          onClick={() => {
+                            closeRentersModal()
+                            requestCancelRental(rental.rental_id)
+                          }}
+                          className="px-3 py-1.5 rounded bg-red-500/20 text-red-300 border border-red-500/40 hover:bg-red-500/30 transition-all text-xs font-semibold"
+                        >
+                          Hủy thuê
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                    )
+                  })()}
+                </div>
+              ))}
+              {getRentalsForServer(selectedServerForRenters.id).length === 0 && (
+                <p className="text-gray-400 text-center py-6">Chưa có dữ liệu người thuê.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
+
+
+
+
+

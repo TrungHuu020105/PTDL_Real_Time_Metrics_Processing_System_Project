@@ -70,6 +70,14 @@ def _fetch_remote_servers():
         )
 
 
+def _get_remote_server_by_id(server_id: str) -> Optional[dict]:
+    servers = _fetch_remote_servers()
+    for s in servers:
+        if str(s.get("server_id")) == str(server_id):
+            return s
+    return None
+
+
 def _remote_json_request(method: str, path: str, payload: Optional[dict] = None, headers: Optional[dict] = None):
     url = f"{METRICS_CENTRAL_BASE_URL.rstrip('/')}{path}"
     body = None
@@ -122,14 +130,25 @@ def _fetch_remote_server_history(server_id: str):
         )
 
 
+def _fetch_remote_rentals():
+    return _remote_json_request(
+        "GET",
+        "/api/rentals",
+        headers={"x-admin-key": METRICS_CENTRAL_ADMIN_TOKEN},
+    )
+
+
 def _normalize_remote_server(item: dict):
     server_id = item.get("server_id")
     normalized_id = str(server_id) if server_id is not None else str(item.get("name", "unknown"))
     return {
         "id": normalized_id,
         "server_id": normalized_id,
-        "name": item.get("name") or normalized_id,
+        "name": item.get("display_name") or item.get("name") or normalized_id,
+        "raw_name": item.get("name"),
         "specs": item.get("note") or (f"IP: {item.get('ip')}" if item.get("ip") else "Remote metrics source"),
+        "specifications": item.get("specifications"),
+        "description": item.get("description"),
         "cpu_cores": item.get("cpu_cores"),
         "cpu_physical_cores": item.get("cpu_physical_cores"),
         "ram_total_gb": item.get("ram_total_gb"),
@@ -137,11 +156,13 @@ def _normalize_remote_server(item: dict):
         "os_type": item.get("os"),
         "os": item.get("os"),
         "architecture": item.get("architecture"),
-        "is_available": True,
-        "price_per_hour": 0.0,
+        "is_available": bool(item.get("is_available", True)),
+        "price_per_month": float(item.get("price_per_month") or 0),
+        "price_per_hour": 0.0,  # Kept for frontend backward compatibility
         "subscribers_count": 0,
         "created_at": item.get("registered_at") or item.get("last_updated"),
         "registered_at": item.get("registered_at"),
+        "metadata_updated_at": item.get("metadata_updated_at"),
         "cpu": item.get("cpu"),
         "ram": item.get("ram"),
         "disk": item.get("disk"),
@@ -174,7 +195,8 @@ def _serialize_rental_for_user(rental: dict, user: User):
         "username": rental.get("username"),
         "ssh_command": rental.get("ssh_command"),
         "private_key_filename": rental.get("private_key_filename"),
-        "private_key_available": show_secret and (not rental.get("private_key_downloaded", False)),
+        # Re-download is allowed with verification code.
+        "private_key_available": show_secret and bool(rental.get("private_key")),
     }
 
 
@@ -189,6 +211,38 @@ class RentConfirmBody(BaseModel):
 
 class CancelRentalBody(BaseModel):
     rental_id: str
+
+
+class SecureActionRequestBody(BaseModel):
+    rental_id: str
+
+
+class SecureActionConfirmBody(BaseModel):
+    challenge_id: str
+    code: str
+
+
+def _serialize_remote_rental_for_user(rental: dict, user: User):
+    rental_id = rental.get("rental_id")
+    with _rent_lock:
+        local_record = _user_rentals.get(rental_id, {})
+    renter_name = rental.get("renter_name") or local_record.get("creator_username")
+    return {
+        "rental_id": rental_id,
+        "server_id": rental.get("server_id"),
+        "renter_name": renter_name,
+        "status": rental.get("status"),
+        "created_at": rental.get("created_at"),
+        "activated_at": rental.get("activated_at"),
+        "cancelled_at": rental.get("cancelled_at"),
+        "ip": rental.get("server_ip"),
+        "port": 22,
+        "username": rental.get("username"),
+        "ssh_command": local_record.get("ssh_command"),
+        "private_key_filename": local_record.get("private_key_filename"),
+        # Re-download is allowed with verification code.
+        "private_key_available": bool(local_record.get("private_key")),
+    }
 
 
 @router.get("/{server_id}/history")
@@ -274,6 +328,7 @@ async def confirm_rent(
     record = {
         "rental_id": rental_id,
         "user_id": current_user.id,
+        "creator_username": current_user.username,
         "server_id": remote.get("server_id") or server_id,
         "status": "active" if remote.get("message") == "VPS rented successfully" else remote.get("status", "pending"),
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -295,18 +350,27 @@ async def confirm_rent(
 
 @router.get("/my-rentals")
 async def get_my_rentals(current_user: User = Depends(get_current_user)):
-    with _rent_lock:
-        items = [r for r in _user_rentals.values() if _is_rental_visible_for_user(r, current_user) and r.get("user_id") == current_user.id]
-    return {"rentals": [_serialize_rental_for_user(r, current_user) for r in items], "total": len(items)}
+    remote_items = _fetch_remote_rentals()
+    if not isinstance(remote_items, list):
+        remote_items = []
+    mine = [r for r in remote_items if r.get("renter_name") == current_user.username]
+    return {
+        "rentals": [_serialize_remote_rental_for_user(r, current_user) for r in mine],
+        "total": len(mine),
+    }
 
 
 @router.get("/rentals")
 async def get_all_rentals(current_user: User = Depends(get_current_user)):
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Only admins can perform this action")
-    with _rent_lock:
-        items = list(_user_rentals.values())
-    return {"rentals": [_serialize_rental_for_user(r, current_user) for r in items], "total": len(items)}
+    items = _fetch_remote_rentals()
+    if not isinstance(items, list):
+        items = []
+    return {
+        "rentals": [_serialize_remote_rental_for_user(r, current_user) for r in items],
+        "total": len(items),
+    }
 
 
 @router.get("/rentals/{rental_id}/private-key")
@@ -330,9 +394,9 @@ async def get_private_key_once(rental_id: str, current_user: User = Depends(get_
     }
 
 
-@router.post("/rentals/cancel")
-async def cancel_rental(
-    body: CancelRentalBody,
+@router.post("/rentals/private-key/request")
+async def request_private_key_code(
+    body: SecureActionRequestBody,
     current_user: User = Depends(get_current_user),
 ):
     with _rent_lock:
@@ -342,6 +406,151 @@ async def cancel_rental(
         if rental.get("user_id") != current_user.id and current_user.role != "admin":
             raise HTTPException(status_code=403, detail="Not allowed")
 
+    challenge_id = f"challenge_key_{random.randint(100000, 999999)}_{int(time.time())}"
+    code = f"{random.randint(0, 999999):06d}"
+    with _rent_lock:
+        _rent_challenges[challenge_id] = {
+            "challenge_id": challenge_id,
+            "action": "download_private_key",
+            "rental_id": body.rental_id,
+            "user_id": current_user.id,
+            "code": code,
+            "created_at": time.time(),
+            "expires_at": time.time() + 300,
+            "used": False,
+        }
+
+    return {
+        "challenge_id": challenge_id,
+        "verification_code": code,
+        "expires_in_seconds": 300,
+    }
+
+
+@router.post("/rentals/private-key/confirm")
+async def confirm_private_key_download(
+    body: SecureActionConfirmBody,
+    current_user: User = Depends(get_current_user),
+):
+    with _rent_lock:
+        challenge = _rent_challenges.get(body.challenge_id)
+        if not challenge:
+            raise HTTPException(status_code=404, detail="Challenge not found")
+        if challenge.get("action") != "download_private_key":
+            raise HTTPException(status_code=400, detail="Invalid challenge action")
+        if challenge["user_id"] != current_user.id:
+            raise HTTPException(status_code=403, detail="Challenge does not belong to current user")
+        if challenge["used"]:
+            raise HTTPException(status_code=400, detail="Challenge already used")
+        if challenge["expires_at"] < time.time():
+            raise HTTPException(status_code=400, detail="Challenge expired")
+        if str(body.code).strip() != challenge["code"]:
+            raise HTTPException(status_code=400, detail="Invalid verification code")
+
+        challenge["used"] = True
+        rental = _user_rentals.get(challenge["rental_id"])
+        if not rental:
+            raise HTTPException(status_code=404, detail="Rental not found")
+        private_key = rental.get("private_key")
+        if not private_key:
+            raise HTTPException(status_code=404, detail="Private key is not available")
+
+        # Keep backward compatibility with existing one-time flag.
+        rental["private_key_downloaded"] = True
+
+    return {
+        "rental_id": rental.get("rental_id"),
+        "private_key_filename": rental.get("private_key_filename"),
+        "private_key": private_key,
+    }
+
+
+@router.post("/rentals/cancel/request")
+async def request_cancel_rental_code(
+    body: SecureActionRequestBody,
+    current_user: User = Depends(get_current_user),
+):
+    remote_items = _fetch_remote_rentals()
+    if not isinstance(remote_items, list):
+        remote_items = []
+    rental = next((r for r in remote_items if r.get("rental_id") == body.rental_id), None)
+    if not rental:
+        raise HTTPException(status_code=404, detail="Rental not found")
+    if current_user.role != "admin" and rental.get("renter_name") != current_user.username:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
+    challenge_id = f"challenge_cancel_{random.randint(100000, 999999)}_{int(time.time())}"
+    code = f"{random.randint(0, 999999):06d}"
+    with _rent_lock:
+        _rent_challenges[challenge_id] = {
+            "challenge_id": challenge_id,
+            "action": "cancel_rental",
+            "rental_id": body.rental_id,
+            "user_id": current_user.id,
+            "code": code,
+            "created_at": time.time(),
+            "expires_at": time.time() + 300,
+            "used": False,
+        }
+    return {
+        "challenge_id": challenge_id,
+        "verification_code": code,
+        "expires_in_seconds": 300,
+    }
+
+
+@router.post("/rentals/cancel/confirm")
+async def confirm_cancel_rental(
+    body: SecureActionConfirmBody,
+    current_user: User = Depends(get_current_user),
+):
+    with _rent_lock:
+        challenge = _rent_challenges.get(body.challenge_id)
+        if not challenge:
+            raise HTTPException(status_code=404, detail="Challenge not found")
+        if challenge.get("action") != "cancel_rental":
+            raise HTTPException(status_code=400, detail="Invalid challenge action")
+        if challenge["user_id"] != current_user.id:
+            raise HTTPException(status_code=403, detail="Challenge does not belong to current user")
+        if challenge["used"]:
+            raise HTTPException(status_code=400, detail="Challenge already used")
+        if challenge["expires_at"] < time.time():
+            raise HTTPException(status_code=400, detail="Challenge expired")
+        if str(body.code).strip() != challenge["code"]:
+            raise HTTPException(status_code=400, detail="Invalid verification code")
+        challenge["used"] = True
+        rental_id = challenge["rental_id"]
+
+    remote = _remote_json_request(
+        "POST",
+        f"/api/rentals/{rental_id}/cancel",
+        payload={},
+        headers={"x-admin-key": METRICS_CENTRAL_ADMIN_TOKEN},
+    )
+
+    with _rent_lock:
+        local_rental = _user_rentals.get(rental_id)
+        if local_rental:
+            local_rental["status"] = remote.get("status", "cancelled")
+            local_rental["cancelled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+    return {"message": remote.get("message", "Rental cancelled"), "rental_id": rental_id, "status": remote.get("status", "cancelled")}
+
+
+@router.post("/rentals/cancel")
+async def cancel_rental(
+    body: CancelRentalBody,
+    current_user: User = Depends(get_current_user),
+):
+    remote_items = _fetch_remote_rentals()
+    if not isinstance(remote_items, list):
+        remote_items = []
+    rental = next((r for r in remote_items if r.get("rental_id") == body.rental_id), None)
+    if not rental:
+        raise HTTPException(status_code=404, detail="Rental not found")
+    if current_user.role != "admin" and rental.get("renter_name") != current_user.username:
+        raise HTTPException(status_code=403, detail="Not allowed")
+
     remote = _remote_json_request(
         "POST",
         f"/api/rentals/{body.rental_id}/cancel",
@@ -350,10 +559,10 @@ async def cancel_rental(
     )
 
     with _rent_lock:
-        rental = _user_rentals.get(body.rental_id)
-        if rental:
-            rental["status"] = remote.get("status", "cancelled")
-            rental["cancelled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        local_rental = _user_rentals.get(body.rental_id)
+        if local_rental:
+            local_rental["status"] = remote.get("status", "cancelled")
+            local_rental["cancelled_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
     return {"message": remote.get("message", "Rental cancelled"), "rental_id": body.rental_id, "status": remote.get("status", "cancelled")}
 
@@ -381,32 +590,11 @@ async def create_server(
     admin: User = Depends(verify_admin),
     db: Session = Depends(get_db)
 ):
-    """[ADMIN] Create a new available server"""
-    server = AvailableServer(
-        name=name,
-        specs=specs,
-        cpu_cores=cpu_cores,
-        ram_gb=ram_gb,
-        os_type=os_type,
-        price_per_hour=price_per_hour,
-        created_by=admin.id,
-        is_available=True
+    """[ADMIN] Deprecated in remote-monitoring mode. Servers are registered by remote agents."""
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Server creation is managed by Metrics Central agent registration (/api/servers/register)."
     )
-    db.add(server)
-    db.commit()
-    db.refresh(server)
-    
-    return {
-        "id": server.id,
-        "name": server.name,
-        "specs": server.specs,
-        "cpu_cores": server.cpu_cores,
-        "ram_gb": server.ram_gb,
-        "os_type": server.os_type,
-        "is_available": server.is_available,
-        "price_per_hour": server.price_per_hour,
-        "created_at": server.created_at
-    }
 
 
 @router.get("/admin/servers", dependencies=[Depends(verify_admin)])
@@ -425,27 +613,15 @@ async def get_all_servers(
 
 @router.delete("/admin/servers/{server_id}", dependencies=[Depends(verify_admin)])
 async def delete_server(
-    server_id: int,
+    server_id: str,
     admin: User = Depends(verify_admin),
     db: Session = Depends(get_db)
 ):
-    """[ADMIN] Delete a server"""
-    server = db.query(AvailableServer).filter(AvailableServer.id == server_id).first()
-    
-    if not server:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Server not found"
-        )
-    
-    # Delete subscriptions first
-    db.query(ServerSubscription).filter(ServerSubscription.server_id == server_id).delete()
-    
-    # Delete server
-    db.delete(server)
-    db.commit()
-    
-    return {"message": "Server deleted successfully"}
+    """[ADMIN] Deprecated in remote-monitoring mode."""
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Server deletion is not exposed by Metrics Central API."
+    )
 
 
 # ============== USER: BROWSE & SUBSCRIBE TO SERVERS ==============
@@ -467,16 +643,30 @@ async def get_server_subscribers(
     server_id: int,
     db: Session = Depends(get_db)
 ):
-    """Get list of subscribers for a server"""
+    """Get renters for a server from Metrics Central rentals."""
+    remote_items = _fetch_remote_rentals()
+    if not isinstance(remote_items, list):
+        remote_items = []
+    matched = [r for r in remote_items if str(r.get("server_id")) == str(server_id)]
     return {
-        "subscribers": [],
-        "total": 0
+        "subscribers": [
+            {
+                "renter_name": r.get("renter_name"),
+                "username": r.get("username"),
+                "status": r.get("status"),
+                "created_at": r.get("created_at"),
+                "activated_at": r.get("activated_at"),
+                "cancelled_at": r.get("cancelled_at"),
+            }
+            for r in matched
+        ],
+        "total": len(matched)
     }
 
 
 @router.post("/{server_id}/subscribe")
 async def subscribe_to_server(
-    server_id: int,
+    server_id: str,
     subscription_duration_months: int = 1,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -542,7 +732,7 @@ async def subscribe_to_server(
 
 @router.delete("/{server_id}/unsubscribe")
 async def unsubscribe_from_server(
-    server_id: int,
+    server_id: str,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -571,10 +761,27 @@ async def get_my_subscriptions(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """Subscription model is disabled in remote-monitoring mode."""
+    """Return active/pending rentals for current user from Metrics Central."""
+    remote_items = _fetch_remote_rentals()
+    if not isinstance(remote_items, list):
+        remote_items = []
+    mine = [r for r in remote_items if r.get("renter_name") == user.username]
     return {
-        "servers": [],
-        "total": 0
+        "servers": [
+            {
+                "rental_id": r.get("rental_id"),
+                "server_id": r.get("server_id"),
+                "server_name": r.get("server_name"),
+                "server_ip": r.get("server_ip"),
+                "username": r.get("username"),
+                "status": r.get("status"),
+                "created_at": r.get("created_at"),
+                "activated_at": r.get("activated_at"),
+                "cancelled_at": r.get("cancelled_at"),
+            }
+            for r in mine
+        ],
+        "total": len(mine)
     }
 
 
@@ -786,15 +993,14 @@ async def get_system_info(admin: User = Depends(verify_admin)):
 
 @router.put("/admin/servers/{server_id}/price")
 async def set_server_price(
-    server_id: int,
+    server_id: str,
     price_per_hour: float,
     admin: User = Depends(verify_admin),
     db: Session = Depends(get_db)
 ):
-    """[ADMIN] Set the price of a server"""
-    server = db.query(AvailableServer).filter(AvailableServer.id == server_id).first()
-    
-    if not server:
+    """[ADMIN] Set server pricing metadata on Metrics Central."""
+    remote_server = _get_remote_server_by_id(server_id)
+    if not remote_server:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Server not found"
@@ -806,63 +1012,70 @@ async def set_server_price(
             detail="Price cannot be negative"
         )
     
-    server.price_per_hour = price_per_hour
-    db.commit()
-    db.refresh(server)
-    
+    _remote_json_request(
+        "PUT",
+        f"/api/servers/{server_id}/metadata",
+        payload={
+            "display_name": remote_server.get("display_name") or remote_server.get("name"),
+            "specifications": remote_server.get("specifications"),
+            "price_per_month": price_per_hour,
+            "description": remote_server.get("description"),
+            "is_available": bool(remote_server.get("is_available", True)),
+        },
+        headers={"x-admin-key": METRICS_CENTRAL_ADMIN_TOKEN},
+    )
+
     return {
-        "id": server.id,
-        "name": server.name,
-        "price_per_hour": server.price_per_hour,
-        "message": "Price updated successfully"
+        "server_id": str(server_id),
+        "price_per_month": price_per_hour,
+        "message": "Price metadata updated successfully"
     }
 
 
 @router.patch("/admin/servers/{server_id}")
 async def update_server(
-    server_id: int,
+    server_id: str,
     server_data: ServerUpdateRequest,
     admin: User = Depends(verify_admin),
     db: Session = Depends(get_db)
 ):
-    """[ADMIN] Update server information (name, specs, price)"""
-    server = db.query(AvailableServer).filter(AvailableServer.id == server_id).first()
-    
-    if not server:
+    """[ADMIN] Update server metadata on Metrics Central."""
+    remote_server = _get_remote_server_by_id(server_id)
+    if not remote_server:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Server not found"
         )
-    
-    # Update only provided fields (not None)
-    if server_data.name is not None:
-        server.name = server_data.name
-    if server_data.specs is not None:
-        server.specs = server_data.specs
-    if server_data.price_per_hour is not None:
-        if server_data.price_per_hour < 0:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Price cannot be negative"
-            )
-        server.price_per_hour = server_data.price_per_hour
-    if server_data.cpu_cores is not None:
-        server.cpu_cores = server_data.cpu_cores
-    if server_data.ram_gb is not None:
-        server.ram_gb = server_data.ram_gb
-    if server_data.os_type is not None:
-        server.os_type = server_data.os_type
-    
-    db.commit()
-    db.refresh(server)
-    
+
+    if server_data.price_per_hour is not None and server_data.price_per_hour < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Price cannot be negative"
+        )
+
+    updated_display_name = server_data.name if server_data.name is not None else (remote_server.get("display_name") or remote_server.get("name"))
+    updated_specs = server_data.specs if server_data.specs is not None else remote_server.get("specifications")
+    updated_price = server_data.price_per_hour if server_data.price_per_hour is not None else remote_server.get("price_per_month")
+    updated_desc = remote_server.get("description")
+    updated_available = bool(remote_server.get("is_available", True))
+
+    _remote_json_request(
+        "PUT",
+        f"/api/servers/{server_id}/metadata",
+        payload={
+            "display_name": updated_display_name,
+            "specifications": updated_specs,
+            "price_per_month": updated_price,
+            "description": updated_desc,
+            "is_available": updated_available,
+        },
+        headers={"x-admin-key": METRICS_CENTRAL_ADMIN_TOKEN},
+    )
+
     return {
-        "id": server.id,
-        "name": server.name,
-        "specs": server.specs,
-        "cpu_cores": server.cpu_cores,
-        "ram_gb": server.ram_gb,
-        "os_type": server.os_type,
-        "price_per_hour": server.price_per_hour,
-        "message": "Server updated successfully"
+        "server_id": str(server_id),
+        "name": updated_display_name,
+        "specifications": updated_specs,
+        "price_per_month": updated_price,
+        "message": "Server metadata updated successfully"
     }

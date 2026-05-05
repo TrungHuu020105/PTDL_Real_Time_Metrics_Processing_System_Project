@@ -37,7 +37,7 @@ export default function AdminDashboard() {
 
       // Calculate metrics
       const totalRevenue = servers.reduce((sum, s) => {
-        const monthlyRevenue = (s.price_per_hour || 0) * 730 * (s.subscribers_count || 0)
+        const monthlyRevenue = Number(s.price_per_month || 0) * (s.subscribers_count || 0)
         return sum + monthlyRevenue
       }, 0)
 

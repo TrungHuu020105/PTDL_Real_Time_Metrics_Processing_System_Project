@@ -164,7 +164,7 @@ export function DeviceProvider({ children }) {
       
       // Auto-select first server
       if (response?.data?.servers?.length > 0 && !selectedServer) {
-        setSelectedServer(response.data.servers[0].id)
+        setSelectedServer(response.data.servers[0].server_id || response.data.servers[0].id)
       }
     } catch (err) {
       console.error('Failed to fetch my servers:', err)
@@ -189,9 +189,9 @@ export function DeviceProvider({ children }) {
   const unsubscribeFromServer = async (serverId) => {
     try {
       await api.delete(`/api/servers/${serverId}/unsubscribe`)
-      setMyServers(myServers.filter(s => s.id !== serverId))
+      setMyServers(myServers.filter(s => (s.server_id || s.id) !== serverId))
       if (selectedServer === serverId) {
-        setSelectedServer(myServers.length > 1 ? myServers[0].id : null)
+        setSelectedServer(myServers.length > 1 ? (myServers[0].server_id || myServers[0].id) : null)
       }
     } catch (err) {
       throw err
@@ -201,23 +201,11 @@ export function DeviceProvider({ children }) {
   // ============== ADMIN FUNCTIONS ==============
   
   const createServer = async (serverData) => {
-    try {
-      const response = await api.post('/api/servers/admin/servers', serverData)
-      setAvailableServers([...availableServers, response.data])
-      return response.data
-    } catch (err) {
-      throw err
-    }
+    throw new Error('Server creation is managed by remote agent registration.')
   }
 
   const deleteServer = async (serverId) => {
-    try {
-      await api.delete(`/api/servers/admin/servers/${serverId}`)
-      setAvailableServers(availableServers.filter(s => s.id !== serverId))
-      await fetchMyServers() // Refresh user's servers
-    } catch (err) {
-      throw err
-    }
+    throw new Error('Server deletion is not exposed in remote monitoring mode.')
   }
 
   const value = {

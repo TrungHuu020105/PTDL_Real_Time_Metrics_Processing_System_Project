@@ -39,7 +39,7 @@ Trong xu thế Internet of Things (IoT), việc giám sát và quản lý các d
 Xây dựng một hệ thống gồm:
 - **Backend FastAPI**: Cung cấp API, WebSocket streaming, logic kinh doanh
 - **Frontend React**: Dashboard tương tác, biểu đồ động, quản lý device
-- **Cơ sở dữ liệu SQLite**: Lưu trữ dữ liệu quan trọng + thông tin hệ thống
+- **Cơ sở dữ liệu Azure SQL**: Lưu trữ dữ liệu quan trọng + thông tin hệ thống
 - **Dual-Layer Architecture**: 
   - Layer 1 (Real-time): 100% dữ liệu stream qua WebSocket → Dashboard
   - Layer 2 (Storage): ~33% dữ liệu lừa chọn save vào Database
@@ -112,7 +112,7 @@ Xây dựng một hệ thống gồm:
 ### 6. **📈 API History Queries** (✅ **FIXED**)
 - ✅ `GET /api/metrics/history-by-date` endpoint
 - ✅ Params: `metric_type`, `source`, `from_date`, `to_date`
-- ✅ **FIX Applied**: Sử dụng SQLite `strftime()` để so sánh date strings
+- ✅ **FIX Applied**: Dùng date-range query tương thích đa hệ CSDL (bao gồm Azure SQL)
 - ✅ Hoạt động chính xác cho:
   - Today (1-day view): 86+ records ✅
   - Past dates (2026-04-05): 12 records ✅
@@ -128,7 +128,7 @@ Xây dựng một hệ thống gồm:
 - ✅ Cannot edit user data (designed limitation)
 
 ### 8. **💾 Database & Data Storage**
-- ✅ SQLite database (metrics.db)
+- ✅ Azure SQL database
 - ✅ 8 models: User, Device, Metric, Alert, IoTDevice, AvailableServer, ServerSubscription, Request
 - ✅ Foreign key support
 - ✅ Indexes for performance (metric_type, timestamp)
@@ -163,7 +163,7 @@ Xây dựng một hệ thống gồm:
 - ✅ Test scripts for API validation
 
 ### 12. **📐 Fixed Issues During Development**
-1. ✅ **Single-day query returns 0 records** → Fixed using SQLite `strftime()` for date comparison
+1. ✅ **Single-day query returns 0 records** → Fixed using date-range query chuẩn SQLAlchemy
 2. ✅ **Alert colors not changing** → Fixed alert trigger logic & metrics fetching
 3. ✅ **Default dashboard shows 7 days** → Changed to show today (1-day view)
 4. ✅ **Demo devices auto-creation** → Removed unnecessary startup code
@@ -184,7 +184,7 @@ Xây dựng một hệ thống gồm:
 | **JWT (python-jose)** | 3.3.0 | Authentication tokens |
 | **bcrypt (passlib)** | 1.7.4 | Password hashing |
 | **psutil** | 5.9.6 | System metrics |
-| **SQLite** | - | Database |
+| **Azure SQL Database** | - | Database |
 
 ### Frontend
 | Technology | Version | Purpose |
@@ -245,7 +245,7 @@ Xây dựng một hệ thống gồm:
                          │ SQLAlchemy ORM
                          │
 ┌────────────────────────┴────────────────────────────────────────┐
-│              DATABASE (SQLite)                                  │
+│            DATABASE (Azure SQL Database)                        │
 │  - metrics (2,977 records, 14-day history)                      │
 │  - users, iot_devices, alerts, servers, subscriptions           │
 │  - indexes on (metric_type, timestamp) for fast queries         │
@@ -402,7 +402,7 @@ python stream_iot_data_live.py
 
 ### Phase 4: Scalability & Performance
 - ☁️ **Cloud Deployment**: Deploy to AWS/Azure/GCP
-- 🗄️ **PostgreSQL Migration**: Replace SQLite with PostgreSQL for production
+- 🗄️ **PostgreSQL Migration**: (Optional) add PostgreSQL support for multi-cloud flexibility
 - ⚡ **Redis Caching**: In-memory caching for faster queries
 - 🔀 **Load Balancing**: Multiple backend instances
 - 📦 **Docker Containerization**: Docker & Kubernetes deployment
@@ -434,7 +434,7 @@ python stream_iot_data_live.py
 - **Date Range**: 2026-03-30 to 2026-04-13 (14 days)
 - **Sensor Types**: 5 types (temperature, humidity, soil_moisture, light_intensity, pressure)
 - **Distribution**: 6 records/hour × 24 hours × 14 days
-- **File Size**: ~212 KB (metrics.db)
+- **Storage**: Managed on Azure SQL Database
 
 ### Performance Metrics
 - **WebSocket Latency**: <100ms (local network)
@@ -452,7 +452,7 @@ python stream_iot_data_live.py
 - ✅ Role-based access control (RBAC)
 
 ### Known Limitations
-- SQLite for single-machine deployment (not recommended for high-concurrency)
+- Azure SQL introduces cloud dependency and network latency considerations
 - Basic authentication (no 2FA or OAuth)
 - Limited to local network WebSocket connections
 - Historical data aggregation done in-memory (not database-level)
@@ -490,3 +490,32 @@ Cảm ơn toàn bộ bạn bè trong nhóm vì sự cố gắng và dedications!
 **Last Updated**: April 13, 2026  
 **Version**: 2.0.0  
 **Status**: ✅ 100% Complete & Functional
+
+---
+
+## Azure SQL Quick Setup
+
+Hệ thống hiện dùng Azure SQL:
+
+1. Cài ODBC Driver 18 for SQL Server trên máy chạy backend.
+2. Cài dependencies:
+```bash
+pip install -r requirements.txt
+```
+3. Mở `.env`, cấu hình các biến DB:
+```env
+DB_SERVER=<server>.database.windows.net
+DB_PORT=1433
+DB_DATABASE=<database>
+DB_USERNAME=<username>
+DB_PASSWORD=<password>
+DB_DRIVER=ODBC Driver 18 for SQL Server
+DB_ENCRYPT=yes
+DB_TRUST_SERVER_CERTIFICATE=no
+DB_CONNECTION_TIMEOUT=30
+```
+4. Khởi chạy backend bình thường, app sẽ đọc cấu hình DB từ các biến trên.
+5. (Tuỳ chọn) migrate dữ liệu cũ từ SQLite:
+```bash
+python migrate_sqlite_to_target_db.py
+```

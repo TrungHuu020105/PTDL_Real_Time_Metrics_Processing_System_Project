@@ -3,7 +3,6 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from app.models import Metric, Alert, User, Device, UserDevicePermission, IoTDevice, ServerSubscriptionRequest, ServerSubscription
 from app.schemas import MetricCreate, AlertCreate, UserRegister, DeviceCreate
 
@@ -549,34 +548,43 @@ def get_metrics_history_by_date(
     if not accessible_sources:
         return []
     
-    # Convert dates to strings in YYYY-MM-DD format
-    if isinstance(from_date, datetime):
-        from_date_str = from_date.strftime('%Y-%m-%d')
+    # Normalize to whole-day range [from_date 00:00:00, to_date+1 00:00:00)
+    if not isinstance(from_date, datetime):
+        from_date = datetime.fromisoformat(str(from_date))
+    if not isinstance(to_date, datetime):
+        to_date = datetime.fromisoformat(str(to_date))
+
+    vietnam_tz = timezone(timedelta(hours=7))
+
+    if from_date.tzinfo is None:
+        from_date = from_date.replace(tzinfo=vietnam_tz)
     else:
-        from_date_str = from_date
-    
-    if isinstance(to_date, datetime):
-        to_date_str = to_date.strftime('%Y-%m-%d')
+        from_date = from_date.astimezone(vietnam_tz)
+
+    if to_date.tzinfo is None:
+        to_date = to_date.replace(tzinfo=vietnam_tz)
     else:
-        to_date_str = to_date
+        to_date = to_date.astimezone(vietnam_tz)
+
+    range_start = from_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    range_end = (to_date + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     
     if source:
         if source not in accessible_sources:
             return []
 
-        # Use strftime for date comparison since SQLite stores timestamps as strings
         metrics = db.query(Metric).filter(
             Metric.metric_type == metric_type,
             Metric.source == source,
-            func.strftime('%Y-%m-%d', Metric.timestamp) >= from_date_str,
-            func.strftime('%Y-%m-%d', Metric.timestamp) <= to_date_str
+            Metric.timestamp >= range_start,
+            Metric.timestamp < range_end
         ).order_by(Metric.timestamp.asc()).all()
     else:
         metrics = db.query(Metric).filter(
             Metric.metric_type == metric_type,
             Metric.source.in_(accessible_sources),
-            func.strftime('%Y-%m-%d', Metric.timestamp) >= from_date_str,
-            func.strftime('%Y-%m-%d', Metric.timestamp) <= to_date_str
+            Metric.timestamp >= range_start,
+            Metric.timestamp < range_end
         ).order_by(Metric.timestamp.asc()).all()
     
     return metrics

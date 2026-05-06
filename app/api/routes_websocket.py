@@ -4,20 +4,33 @@ WebSocket routes cho Real-Time Metrics Monitoring
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from app.websocket_manager import ConnectionManager
 from app.schemas_ws import MetricsData, IotMetricsData, StatusResponse
-from app.schemas import MetricCreate
+from app.schemas import MetricCreate, AlertCreate
 from app.database import SessionLocal
-from app.crud import create_metrics_bulk
+from app.crud import create_metrics_bulk, create_alert
+from app.models import IoTDevice
+from app.services.alert_service import dispatch_alert_notifications
 import json
 from datetime import datetime
+import asyncio
+import time
 
 # Khởi tạo router
 router = APIRouter(tags=["WebSocket Metrics"])
 
 # Khởi tạo ConnectionManager (global)
 manager = ConnectionManager()
+ALERT_NOTIFY_COOLDOWN_SECONDS = 5
+_last_alert_notification_ts = {}
 
 
-def save_iot_metric_to_db(metric_type: str, source: str, value: float, save_flag: bool):
+def save_iot_metric_to_db(
+    metric_type: str,
+    source: str,
+    location: str | None,
+    value: float,
+    unit: str,
+    save_flag: bool,
+):
     """
     Save IoT metric to database - but only if save_flag is True
     
@@ -30,24 +43,101 @@ def save_iot_metric_to_db(metric_type: str, source: str, value: float, save_flag
     with open("backend_filtering.log", "a") as f:
         f.write(f"{metric_type}={value} | saved={save_flag}\n")
     
-    if not save_flag:
-        return  # Skip DB save for non-important data
-    
+    db = None
     try:
         db = SessionLocal()
+        # Always evaluate alert state, even for realtime-only records.
+        _check_and_trigger_alert(db, metric_type, source, value)
+
+        if not save_flag:
+            return  # Skip DB save for non-important data
+
         metric = MetricCreate(
+            event_ts=None,
+            sensor_id=source,
+            location=location,
             metric_type=metric_type,
-            value=value,
-            source=source,
-            timestamp=None
+            metric_value=value,
+            unit=unit
         )
         create_metrics_bulk(db, [metric])
-        db.close()
         print(f"💾 Saved {metric_type}={value} (source={source}) to DB")
     except Exception as e:
         print(f"❌ DB save error: {e}")
+    finally:
         if db:
             db.close()
+
+
+def _check_and_trigger_alert(db, metric_type: str, source: str, value: float):
+    """Check threshold for IoT device and trigger alert record + notifications."""
+    try:
+        device = db.query(IoTDevice).filter(IoTDevice.source == source).first()
+    except Exception as exc:
+        print(f"[ALERT] Failed to query IoTDevice for source={source}: {exc}")
+        return
+    if not device:
+        print(f"[ALERT] No IoTDevice found for source={source}")
+        return
+
+    has_thresholds = (
+        device.lower_threshold is not None or
+        device.upper_threshold is not None
+    )
+    if not device.alert_enabled and not has_thresholds:
+        print(
+            f"[ALERT] Skipped source={source} metric={metric_type} "
+            f"(alert_enabled={device.alert_enabled}, no thresholds)"
+        )
+        return
+
+    print(
+        f"[ALERT] Check source={source} metric={metric_type} value={value} "
+        f"enabled={device.alert_enabled} low={device.lower_threshold} high={device.upper_threshold}"
+    )
+
+    threshold = None
+    status = None
+    if device.upper_threshold is not None and value > device.upper_threshold:
+        threshold = device.upper_threshold
+        status = "critical"
+    elif device.lower_threshold is not None and value < device.lower_threshold:
+        threshold = device.lower_threshold
+        status = "warning"
+
+    alert_key = f"{source}:{metric_type}"
+
+    if threshold is None or status is None:
+        _last_alert_notification_ts.pop(alert_key, None)
+        return
+
+    now_ts = time.time()
+    last_ts = _last_alert_notification_ts.get(alert_key, 0)
+    if now_ts - last_ts < ALERT_NOTIFY_COOLDOWN_SECONDS:
+        return
+
+    try:
+        alert = create_alert(
+            db,
+            AlertCreate(
+                metric_type=metric_type,
+                status=status,
+                current_value=value,
+                threshold=float(threshold),
+                message=f"{metric_type} threshold exceeded on {device.name}",
+                source=source,
+            ),
+        )
+    except Exception as exc:
+        print(f"[ALERT] Failed to create alert for {source}/{metric_type}: {exc}")
+        return
+    _last_alert_notification_ts[alert_key] = now_ts
+    print(f"[ALERT] Triggered {alert_key} value={value} threshold={threshold} status={status} alert_id={alert.id}")
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(dispatch_alert_notifications(alert.id))
+    except RuntimeError:
+        pass
 
 
 @router.websocket("/ws/{client_id}")
@@ -93,10 +183,12 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                         
                         # Save to database - but only if "saved" flag is True
                         save_iot_metric_to_db(
-                            metrics.metric_type, 
-                            metrics.source, 
+                            metrics.metric_type,
+                            metrics.source,
+                            metrics.location,
                             metrics.value,
-                            metrics.saved  # Check "saved" flag for DB filtering
+                            metrics.unit,
+                            metrics.saved
                         )
                         # Send confirmation
                         await websocket.send_text(json.dumps({

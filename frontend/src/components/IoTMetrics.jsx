@@ -16,6 +16,8 @@ export default function IoTMetrics() {
   const lastAlertRef = useRef(null)
   const wsRef = useRef(null)
   const realtimeDataRef = useRef({}) // Store realtime data from WebSocket
+  const getMetricValue = (m) => m?.metric_value ?? m?.value
+  const getMetricTimestamp = (m) => m?.event_ts ?? m?.timestamp
 
   const iotMetrics = {
     temperature: { label: '🌡️ Temperature', unit: '°C', color: '#ff6b6b', min: 15, max: 35 },
@@ -36,25 +38,25 @@ export default function IoTMetrics() {
       // Combine with realtime data from WebSocket
       if (realtimeDataRef.current[metricType]) {
         const realtimeMetrics = realtimeDataRef.current[metricType].map(d => ({
-          value: d.value,
-          timestamp: d.timestamp.toISOString()
+          metric_value: d.value,
+          event_ts: d.timestamp.toISOString()
         }))
         // Add realtime data that's not already in history
         metrics = [...metrics, ...realtimeMetrics]
         // Remove duplicates and sort by timestamp
         const uniqueMetrics = {}
         metrics.forEach(m => {
-          const key = `${m.value}_${m.timestamp}`
+          const key = `${getMetricValue(m)}_${getMetricTimestamp(m)}`
           uniqueMetrics[key] = m
         })
         metrics = Object.values(uniqueMetrics).sort((a, b) => 
-          new Date(a.timestamp) - new Date(b.timestamp)
+          new Date(getMetricTimestamp(a)) - new Date(getMetricTimestamp(b))
         )
       }
       
       // Set current to latest value
       if (metrics.length > 0) {
-        const latestValue = metrics[metrics.length - 1].value
+        const latestValue = getMetricValue(metrics[metrics.length - 1])
         setCurrent(latestValue)
         // Check for alerts
         const newAlert = checkMetricAlert(metricType, latestValue)
@@ -85,14 +87,14 @@ export default function IoTMetrics() {
 
       const grouped = {}
       metrics.forEach(metric => {
-        const time = new Date(metric.timestamp).toLocaleTimeString('vi-VN', {
+        const time = new Date(getMetricTimestamp(metric)).toLocaleTimeString('vi-VN', {
           hour: '2-digit',
           minute: '2-digit'
         })
         if (!grouped[time]) {
           grouped[time] = []
         }
-        grouped[time].push(metric.value)
+        grouped[time].push(getMetricValue(metric))
       })
 
       const chartData = Object.entries(grouped).map(([time, values]) => ({
@@ -100,7 +102,7 @@ export default function IoTMetrics() {
         value: (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2)
       }))
 
-      const allValues = metrics.map(m => m.value)
+      const allValues = metrics.map(m => getMetricValue(m)).filter(v => v !== undefined && v !== null)
       if (allValues.length > 0) {
         setStats({
           avg: (allValues.reduce((a, b) => a + b, 0) / allValues.length).toFixed(2),

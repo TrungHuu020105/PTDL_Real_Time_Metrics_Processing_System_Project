@@ -10,18 +10,20 @@ class Metric(Base):
     __tablename__ = "metrics"
 
     id = Column(Integer, primary_key=True, index=True)
-    metric_type = Column(String(50), index=True, nullable=False)  # cpu, memory
-    value = Column(Float, nullable=False)
-    source = Column(String(100), nullable=False)  # e.g., "server_1", "server_2"
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), index=True, nullable=False)
+    event_ts = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), index=True, nullable=False)
+    sensor_id = Column(String(100), nullable=False, index=True)
+    location = Column(String(255), nullable=True)
+    metric_type = Column(String(50), index=True, nullable=False)  # temperature, humidity, soil_moisture, ...
+    metric_value = Column(Float, nullable=False)
+    unit = Column(String(50), nullable=True)
 
     # Composite index for efficient time-range queries
     __table_args__ = (
-        Index('idx_metric_type_timestamp', 'metric_type', 'timestamp'),
+        Index('idx_metric_type_event_ts', 'metric_type', 'event_ts'),
     )
 
     def __repr__(self):
-        return f"<Metric(type={self.metric_type}, value={self.value}, source={self.source}, time={self.timestamp})>"
+        return f"<Metric(sensor={self.sensor_id}, type={self.metric_type}, value={self.metric_value}, time={self.event_ts})>"
 
 
 class Alert(Base):
@@ -55,6 +57,10 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
     email = Column(String(100), unique=True, index=True, nullable=False)
+    notification_email = Column(String(100), nullable=True)
+    email_enabled = Column(Boolean, default=False, nullable=False)
+    telegram_chat_id = Column(String(64), unique=True, nullable=True)
+    telegram_enabled = Column(Boolean, default=False, nullable=False)
     hashed_password = Column(String(255), nullable=False)
     role = Column(String(20), nullable=False, default="user")  # 'admin' or 'user'
     is_active = Column(Boolean, default=True, nullable=False)
@@ -65,6 +71,18 @@ class User(Base):
 
     def __repr__(self):
         return f"<User(username={self.username}, role={self.role}, approved={self.is_approved})>"
+
+
+class UserNotificationTarget(Base):
+    """Per-user notification targets (multiple telegram chat ids / emails)."""
+    __tablename__ = "user_notification_targets"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    target_type = Column(String(20), nullable=False, index=True)  # telegram | email
+    target_value = Column(String(255), nullable=False)
+    is_enabled = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
 
 
 class Device(Base):

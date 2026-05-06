@@ -7,24 +7,23 @@ from pydantic import BaseModel, Field, validator
 
 class MetricCreate(BaseModel):
     """Schema for creating a single metric"""
-    metric_type: str = Field(..., description="Type of metric: cpu or memory")
-    value: float = Field(..., description="Numeric value of the metric")
-    source: str = Field(..., description="Source identifier (e.g., server name)")
-    timestamp: Optional[datetime] = Field(default=None, description="Timestamp of metric (auto-generated if not provided)")
+    event_ts: Optional[datetime] = Field(default=None, description="Event timestamp (auto-generated if not provided)")
+    sensor_id: str = Field(..., min_length=1, max_length=100, description="Sensor/device identifier")
+    location: Optional[str] = Field(default=None, max_length=255, description="Sensor location")
+    metric_type: str = Field(..., description="IoT metric type")
+    metric_value: float = Field(..., description="Numeric metric value")
+    unit: Optional[str] = Field(default=None, max_length=50, description="Measurement unit")
 
     @validator('metric_type')
     def validate_metric_type(cls, v):
         """Validate metric_type is one of allowed values"""
-        # Server metrics
-        server_metrics = {"cpu", "memory"}
-        # IoT sensor metrics
         iot_metrics = {"temperature", "humidity", "soil_moisture", "light_intensity", "pressure"}
-        allowed = server_metrics | iot_metrics
+        allowed = iot_metrics
         if v not in allowed:
             raise ValueError(f"metric_type must be one of {allowed}")
         return v
 
-    @validator('value')
+    @validator('metric_value')
     def validate_value(cls, v):
         """Validate value is positive number"""
         if v < 0:
@@ -33,11 +32,11 @@ class MetricCreate(BaseModel):
             raise ValueError("value seems unreasonably large")
         return v
 
-    @validator('source')
+    @validator('sensor_id')
     def validate_source(cls, v):
-        """Validate source is not empty"""
+        """Validate sensor_id is not empty"""
         if not v or len(v.strip()) == 0:
-            raise ValueError("source cannot be empty")
+            raise ValueError("sensor_id cannot be empty")
         return v.strip()
 
 
@@ -58,10 +57,12 @@ class MetricBulkCreate(BaseModel):
 class MetricResponse(BaseModel):
     """Schema for metric response"""
     id: int
+    event_ts: datetime
+    sensor_id: str
+    location: Optional[str] = None
     metric_type: str
-    value: float
-    source: str
-    timestamp: datetime
+    metric_value: float
+    unit: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -69,18 +70,21 @@ class MetricResponse(BaseModel):
 
 class LatestMetricsResponse(BaseModel):
     """Schema for latest metrics response"""
-    latest_cpu: Optional[float] = None
-    latest_memory: Optional[float] = None
-    latest_request_count: Optional[float] = None
+    latest_temperature: Optional[float] = None
+    latest_humidity: Optional[float] = None
+    latest_soil_moisture: Optional[float] = None
+    latest_light_intensity: Optional[float] = None
+    latest_pressure: Optional[float] = None
     timestamp: datetime
 
 
 class SummaryMetricsResponse(BaseModel):
     """Schema for summary metrics response"""
-    avg_cpu_1m: Optional[float] = None
-    avg_memory_1m: Optional[float] = None
-    latest_cpu: Optional[float] = None
-    latest_memory: Optional[float] = None
+    avg_temperature: Optional[float] = None
+    avg_humidity: Optional[float] = None
+    avg_soil_moisture: Optional[float] = None
+    avg_light_intensity: Optional[float] = None
+    avg_pressure: Optional[float] = None
     timestamp: datetime
 
 
@@ -111,9 +115,8 @@ class AlertCreate(BaseModel):
     @validator('metric_type')
     def validate_metric_type(cls, v):
         """Validate metric_type"""
-        server_metrics = {"cpu", "memory"}
         iot_metrics = {"temperature", "humidity", "soil_moisture", "light_intensity", "pressure"}
-        allowed = server_metrics | iot_metrics
+        allowed = iot_metrics
         if v not in allowed:
             raise ValueError(f"metric_type must be one of {allowed}")
         return v
@@ -197,6 +200,10 @@ class UserResponse(BaseModel):
     id: int
     username: str
     email: str
+    notification_email: Optional[str] = None
+    email_enabled: bool = False
+    telegram_chat_id: Optional[str] = None
+    telegram_enabled: bool = False
     role: str
     is_active: bool
     is_approved: bool

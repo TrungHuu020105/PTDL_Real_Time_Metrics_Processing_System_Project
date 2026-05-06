@@ -41,6 +41,7 @@ class IotMetricsData(BaseModel):
     metric_type: str = Field(..., description="Type of metric (temperature, humidity, etc.)")
     value: float = Field(..., description="Sensor value")
     source: str = Field(..., description="Sensor source ID")
+    location: Optional[str] = Field(default=None, description="Sensor location")
     unit: str = Field(default="", description="Unit of measurement")
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     saved: bool = Field(default=True, description="Whether to save to database (True) or realtime-only (False)")

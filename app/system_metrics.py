@@ -7,8 +7,6 @@ import psutil
 import platform
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any
-from app.schemas import MetricCreate
-from app.crud import create_metric
 from sqlalchemy.orm import Session
 
 
@@ -87,111 +85,18 @@ class SystemMetricsCollector:
 
     @staticmethod
     def save_cpu_metric(db: Session, source: str = "system_monitor") -> Dict[str, Any]:
-        """
-        Measure and save current CPU usage to database.
-        
-        Args:
-            db: Database session
-            source: Data source identifier
-            
-        Returns:
-            Created metric data
-        """
-        cpu_value = SystemMetricsCollector.get_cpu_percent(interval=0.5)
-        
-        metric = MetricCreate(
-            metric_type="cpu",
-            value=cpu_value,
-            source=source,
-            timestamp=None  # Use current time
-        )
-        
-        created = create_metric(db, metric)
-        return {
-            "metric_type": "cpu",
-            "value": cpu_value,
-            "source": source,
-            "timestamp": created.timestamp.isoformat()
-        }
+        """Disabled: CPU persistence was removed by design."""
+        raise RuntimeError("Saving CPU metrics to database has been disabled.")
 
     @staticmethod
     def save_memory_metric(db: Session, source: str = "system_monitor") -> Dict[str, Any]:
-        """
-        Measure and save current memory usage to database.
-        
-        Args:
-            db: Database session
-            source: Data source identifier
-            
-        Returns:
-            Created metric data
-        """
-        memory_value = SystemMetricsCollector.get_memory_percent()
-        
-        metric = MetricCreate(
-            metric_type="memory",
-            value=memory_value,
-            source=source,
-            timestamp=None  # Use current time
-        )
-        
-        created = create_metric(db, metric)
-        return {
-            "metric_type": "memory",
-            "value": memory_value,
-            "source": source,
-            "timestamp": created.timestamp.isoformat()
-        }
+        """Disabled: memory persistence was removed by design."""
+        raise RuntimeError("Saving memory metrics to database has been disabled.")
 
     @staticmethod
     def save_system_metrics(db: Session, source: str = "system_monitor") -> Dict[str, Any]:
-        """
-        Measure and save both CPU and memory metrics to database.
-        
-        Args:
-            db: Database session
-            source: Data source identifier
-            
-        Returns:
-            Dictionary with both metrics
-        """
-        cpu_value = SystemMetricsCollector.get_cpu_percent(interval=0.1)
-        memory_value = SystemMetricsCollector.get_memory_percent()
-        vietnam_tz = timezone(timedelta(hours=7))
-        timestamp = datetime.now(vietnam_tz)
-        
-        # Create CPU metric
-        cpu_metric = MetricCreate(
-            metric_type="cpu",
-            value=cpu_value,
-            source=source,
-            timestamp=timestamp
-        )
-        cpu_created = create_metric(db, cpu_metric)
-        
-        # Create memory metric
-        memory_metric = MetricCreate(
-            metric_type="memory",
-            value=memory_value,
-            source=source,
-            timestamp=timestamp
-        )
-        memory_created = create_metric(db, memory_metric)
-        
-        return {
-            "timestamp": timestamp.isoformat(),
-            "source": source,
-            "metrics": {
-                "cpu": {
-                    "value": cpu_value,
-                    "percent": cpu_value
-                },
-                "memory": {
-                    "value": memory_value,
-                    "percent": memory_value
-                }
-            }
-        }
+        """Disabled: CPU/RAM persistence was removed by design."""
+        raise RuntimeError("Saving CPU/RAM metrics to database has been disabled.")
 
     @staticmethod
     def get_system_info() -> Dict[str, Any]:

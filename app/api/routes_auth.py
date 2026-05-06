@@ -3,19 +3,56 @@
 from datetime import datetime, timedelta
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Header
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from app.database import get_db
-from app.models import User
+from app.models import User, UserNotificationTarget
 from app.schemas import UserRegister, UserLogin, TokenResponse, UserResponse, DeviceResponse
 from app import crud
 from app.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
+from app.services.telegram_service import send_telegram_message
+from app.services.email_service import send_email_alert
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+SUCCESS_NOTIFICATION_TEXT = """✅ Kết nối Telegram thành công!
+
+Bạn sẽ nhận được thông báo cảnh báo từ các thiết bị IoT của mình khi chúng vượt ngưỡng.
+
+🔔 Tính năng:
+• Real-time alerts khi thiết bị vượt ngưỡng
+• Thông tin chi tiết: tên thiết bị, giá trị, ngưỡng
+• Thời gian chính xác (Vietnam TZ)
+
+Quản lý ngưỡng cảnh báo tại dashboard của bạn."""
+
+
+def _success_notification_html() -> str:
+    lines = SUCCESS_NOTIFICATION_TEXT.split("\n")
+    html_lines = "<br>".join(lines)
+    return f"<div style='font-family:Arial,sans-serif;line-height:1.6'>{html_lines}</div>"
+
+
+class TelegramLinkRequest(BaseModel):
+    chat_id: str
+
+
+class EmailEnableRequest(BaseModel):
+    email: str
+
+
+class NotificationTargetCreateRequest(BaseModel):
+    target_type: str  # telegram | email
+    target_value: str
+
+
+class NotificationTargetToggleRequest(BaseModel):
+    is_enabled: bool
 
 
 def hash_password(password: str) -> str:
@@ -197,3 +234,221 @@ async def get_user_info(user_id: int, db: Session = Depends(get_db)):
         "email": user.email,
         "role": user.role
     }
+
+
+@router.post("/telegram/link")
+async def link_telegram(
+    payload: TelegramLinkRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    existing = db.query(User).filter(User.telegram_chat_id == payload.chat_id, User.id != current_user.id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="This chat_id is already linked to another account")
+    current_user.telegram_chat_id = payload.chat_id
+    current_user.telegram_enabled = True
+    db.commit()
+    ok, detail = send_telegram_message(payload.chat_id, SUCCESS_NOTIFICATION_TEXT)
+    if not ok:
+        return {"success": False, "message": detail}
+
+    destination_email = current_user.notification_email or current_user.email
+    if current_user.email_enabled and destination_email:
+        send_email_alert(destination_email, "Kết nối cảnh báo IoT thành công", _success_notification_html())
+
+    return {"success": True, "message": "Telegram linked and confirmation was sent"}
+
+
+@router.post("/telegram/test")
+async def test_telegram(
+    current_user: User = Depends(get_current_user),
+):
+    if not current_user.telegram_chat_id:
+        raise HTTPException(status_code=400, detail="Telegram is not linked")
+    ok, detail = send_telegram_message(current_user.telegram_chat_id, "Test alert from Metrics system.")
+    if not ok:
+        raise HTTPException(status_code=400, detail=detail)
+    return {"success": True, "message": "Telegram test message sent"}
+
+
+@router.delete("/telegram/unlink")
+async def unlink_telegram(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.telegram_chat_id = None
+    current_user.telegram_enabled = False
+    db.commit()
+    return {"success": True, "message": "Telegram unlinked"}
+
+
+@router.post("/email/enable")
+async def enable_email_alerts(
+    payload: EmailEnableRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.notification_email = str(payload.email)
+    current_user.email_enabled = True
+    db.commit()
+    subject = "Kết nối cảnh báo IoT thành công"
+    body = _success_notification_html()
+    ok, detail = send_email_alert(str(payload.email), subject, body)
+    if not ok:
+        raise HTTPException(status_code=400, detail=detail)
+
+    if current_user.telegram_enabled and current_user.telegram_chat_id:
+        send_telegram_message(current_user.telegram_chat_id, SUCCESS_NOTIFICATION_TEXT)
+
+    return {"success": True, "message": "Email enabled and test message sent"}
+
+
+@router.post("/email/test")
+async def test_email_alerts(
+    current_user: User = Depends(get_current_user),
+):
+    to_email = current_user.notification_email or current_user.email
+    if not to_email:
+        raise HTTPException(status_code=400, detail="No email configured")
+    ok, detail = send_email_alert(
+        to_email,
+        "Metrics alert test",
+        "<h3>Test email</h3><p>Email alert channel is working.</p>",
+    )
+    if not ok:
+        raise HTTPException(status_code=400, detail=detail)
+    return {"success": True, "message": "Test email sent"}
+
+
+@router.get("/email/status")
+async def get_email_status(current_user: User = Depends(get_current_user)):
+    return {
+        "email": current_user.notification_email or current_user.email,
+        "email_enabled": current_user.email_enabled,
+    }
+
+
+@router.patch("/email/toggle")
+async def toggle_email_alerts(
+    enabled: bool,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.email_enabled = enabled
+    db.commit()
+    return {"success": True, "email_enabled": current_user.email_enabled}
+
+
+@router.patch("/email/update")
+async def update_email_address(
+    payload: EmailEnableRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.notification_email = str(payload.email)
+    db.commit()
+    return {"success": True, "email": current_user.notification_email}
+
+
+@router.delete("/email/disable")
+async def disable_email_alerts(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.email_enabled = False
+    db.commit()
+    return {"success": True, "message": "Email alerts disabled"}
+
+
+@router.get("/notifications/targets")
+async def list_notification_targets(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    rows = db.query(UserNotificationTarget).filter(UserNotificationTarget.user_id == current_user.id).all()
+    return {
+        "targets": [
+            {
+                "id": r.id,
+                "target_type": r.target_type,
+                "target_value": r.target_value,
+                "is_enabled": r.is_enabled,
+                "created_at": r.created_at,
+            }
+            for r in rows
+        ]
+    }
+
+
+@router.post("/notifications/targets")
+async def add_notification_target(
+    payload: NotificationTargetCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    ttype = (payload.target_type or "").strip().lower()
+    value = (payload.target_value or "").strip()
+    if ttype not in {"telegram", "email"}:
+        raise HTTPException(status_code=400, detail="target_type must be telegram or email")
+    if not value:
+        raise HTTPException(status_code=400, detail="target_value is required")
+
+    existing = db.query(UserNotificationTarget).filter(
+        UserNotificationTarget.user_id == current_user.id,
+        UserNotificationTarget.target_type == ttype,
+        UserNotificationTarget.target_value == value,
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Target already exists")
+
+    row = UserNotificationTarget(
+        user_id=current_user.id,
+        target_type=ttype,
+        target_value=value,
+        is_enabled=True,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+
+    if ttype == "telegram":
+        send_telegram_message(value, SUCCESS_NOTIFICATION_TEXT)
+    else:
+        send_email_alert(value, "Kết nối cảnh báo IoT thành công", _success_notification_html())
+
+    return {"success": True, "target_id": row.id}
+
+
+@router.patch("/notifications/targets/{target_id}")
+async def toggle_notification_target(
+    target_id: int,
+    payload: NotificationTargetToggleRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = db.query(UserNotificationTarget).filter(
+        UserNotificationTarget.id == target_id,
+        UserNotificationTarget.user_id == current_user.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Target not found")
+    row.is_enabled = payload.is_enabled
+    db.commit()
+    return {"success": True, "is_enabled": row.is_enabled}
+
+
+@router.delete("/notifications/targets/{target_id}")
+async def delete_notification_target(
+    target_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = db.query(UserNotificationTarget).filter(
+        UserNotificationTarget.id == target_id,
+        UserNotificationTarget.user_id == current_user.id,
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Target not found")
+    db.delete(row)
+    db.commit()
+    return {"success": True}

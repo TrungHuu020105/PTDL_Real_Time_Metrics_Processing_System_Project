@@ -17,6 +17,8 @@ export default function UserDashboard() {
   const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0])
   const [chartData, setChartData] = useState([])
   const [loading, setLoading] = useState(false)
+  const getMetricValue = (m) => m?.metric_value ?? m?.value
+  const getMetricTimestamp = (m) => m?.event_ts ?? m?.timestamp
 
   const selectedDevice = devices?.find(d => d.id === selectedDeviceId) || devices?.[0]
 
@@ -59,13 +61,13 @@ export default function UserDashboard() {
           console.log(`[UserDashboard] Aggregating into hourly buckets`)
           const hourlyData = {}
           metrics.forEach(m => {
-            const d = new Date(m.timestamp)
+            const d = new Date(getMetricTimestamp(m))
             const hour = d.getHours().toString().padStart(2, '0')
             const key = `${hour}:00`
             if (!hourlyData[key]) {
               hourlyData[key] = { values: [], hour: key }
             }
-            hourlyData[key].values.push(m.value)
+            hourlyData[key].values.push(getMetricValue(m))
           })
 
           const data = Object.values(hourlyData)
@@ -81,12 +83,12 @@ export default function UserDashboard() {
           console.log(`[UserDashboard] Aggregating into daily buckets`)
           const dailyData = {}
           metrics.forEach(m => {
-            const d = new Date(m.timestamp)
+            const d = new Date(getMetricTimestamp(m))
             const key = d.toISOString().split('T')[0]
             if (!dailyData[key]) {
               dailyData[key] = { values: [], date: key }
             }
-            dailyData[key].values.push(m.value)
+            dailyData[key].values.push(getMetricValue(m))
           })
 
           const data = Object.values(dailyData)

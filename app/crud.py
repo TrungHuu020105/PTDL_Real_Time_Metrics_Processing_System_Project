@@ -7,17 +7,28 @@ from app.models import Metric, Alert, User, Device, UserDevicePermission, IoTDev
 from app.schemas import MetricCreate, AlertCreate, UserRegister, DeviceCreate
 
 
+def _resolve_metric_location(db: Session, sensor_id: str, location: Optional[str]) -> Optional[str]:
+    """Resolve metric location: prefer provided location, fallback to IoT device location."""
+    if location and location.strip():
+        return location.strip()
+    device = db.query(IoTDevice).filter(IoTDevice.source == sensor_id).first()
+    return device.location if device else None
+
+
 def create_metric(db: Session, metric: MetricCreate) -> Metric:
     """Create a single metric record"""
     # Use provided timestamp or current time (Vietnam timezone UTC+7)
     vietnam_tz = timezone(timedelta(hours=7))
-    timestamp = metric.timestamp if metric.timestamp else datetime.now(vietnam_tz)
+    event_ts = metric.event_ts if metric.event_ts else datetime.now(vietnam_tz)
+    resolved_location = _resolve_metric_location(db, metric.sensor_id, metric.location)
     
     db_metric = Metric(
+        event_ts=event_ts,
+        sensor_id=metric.sensor_id,
+        location=resolved_location,
         metric_type=metric.metric_type,
-        value=metric.value,
-        source=metric.source,
-        timestamp=timestamp
+        metric_value=metric.metric_value,
+        unit=metric.unit
     )
     db.add(db_metric)
     db.commit()
@@ -30,12 +41,15 @@ def create_metrics_bulk(db: Session, metrics: List[MetricCreate]) -> List[Metric
     db_metrics = []
     for metric in metrics:
         vietnam_tz = timezone(timedelta(hours=7))
-        timestamp = metric.timestamp if metric.timestamp else datetime.now(vietnam_tz)
+        event_ts = metric.event_ts if metric.event_ts else datetime.now(vietnam_tz)
+        resolved_location = _resolve_metric_location(db, metric.sensor_id, metric.location)
         db_metric = Metric(
+            event_ts=event_ts,
+            sensor_id=metric.sensor_id,
+            location=resolved_location,
             metric_type=metric.metric_type,
-            value=metric.value,
-            source=metric.source,
-            timestamp=timestamp
+            metric_value=metric.metric_value,
+            unit=metric.unit
         )
         db_metrics.append(db_metric)
     
@@ -50,16 +64,29 @@ def create_metrics_bulk(db: Session, metrics: List[MetricCreate]) -> List[Metric
 
 
 def get_latest_metrics(db: Session) -> tuple:
-    """Get latest values for each metric type"""
-    latest_cpu = db.query(Metric).filter(
-        Metric.metric_type == "cpu"
-    ).order_by(Metric.timestamp.desc()).first()
-    
-    latest_memory = db.query(Metric).filter(
-        Metric.metric_type == "memory"
-    ).order_by(Metric.timestamp.desc()).first()
-    
-    return latest_cpu, latest_memory
+    """Get latest IoT metrics by type"""
+    latest_temperature = db.query(Metric).filter(
+        Metric.metric_type == "temperature"
+    ).order_by(Metric.event_ts.desc()).first()
+    latest_humidity = db.query(Metric).filter(
+        Metric.metric_type == "humidity"
+    ).order_by(Metric.event_ts.desc()).first()
+    latest_soil_moisture = db.query(Metric).filter(
+        Metric.metric_type == "soil_moisture"
+    ).order_by(Metric.event_ts.desc()).first()
+    latest_light_intensity = db.query(Metric).filter(
+        Metric.metric_type == "light_intensity"
+    ).order_by(Metric.event_ts.desc()).first()
+    latest_pressure = db.query(Metric).filter(
+        Metric.metric_type == "pressure"
+    ).order_by(Metric.event_ts.desc()).first()
+    return (
+        latest_temperature,
+        latest_humidity,
+        latest_soil_moisture,
+        latest_light_intensity,
+        latest_pressure,
+    )
 
 
 def get_metrics_history(
@@ -73,8 +100,8 @@ def get_metrics_history(
     
     metrics = db.query(Metric).filter(
         Metric.metric_type == metric_type,
-        Metric.timestamp >= time_threshold
-    ).order_by(Metric.timestamp.asc()).all()
+        Metric.event_ts >= time_threshold
+    ).order_by(Metric.event_ts.asc()).all()
     
     return metrics
 
@@ -90,28 +117,46 @@ def get_metrics_in_range(
     
     metrics = db.query(Metric).filter(
         Metric.metric_type == metric_type,
-        Metric.timestamp >= time_threshold
-    ).order_by(Metric.timestamp.asc()).all()
+        Metric.event_ts >= time_threshold
+    ).order_by(Metric.event_ts.asc()).all()
     
     return metrics
 
 
 def get_all_metrics_in_range(db: Session, minutes: int) -> tuple:
-    """Get all metric types within a time range"""
+    """Get all IoT metric types within a time range"""
     vietnam_tz = timezone(timedelta(hours=7))
     time_threshold = datetime.now(vietnam_tz) - timedelta(minutes=minutes)
     
-    cpu_metrics = db.query(Metric).filter(
-        Metric.metric_type == "cpu",
-        Metric.timestamp >= time_threshold
+    temperature_metrics = db.query(Metric).filter(
+        Metric.metric_type == "temperature",
+        Metric.event_ts >= time_threshold
     ).all()
     
-    memory_metrics = db.query(Metric).filter(
-        Metric.metric_type == "memory",
-        Metric.timestamp >= time_threshold
+    humidity_metrics = db.query(Metric).filter(
+        Metric.metric_type == "humidity",
+        Metric.event_ts >= time_threshold
+    ).all()
+    soil_moisture_metrics = db.query(Metric).filter(
+        Metric.metric_type == "soil_moisture",
+        Metric.event_ts >= time_threshold
+    ).all()
+    light_intensity_metrics = db.query(Metric).filter(
+        Metric.metric_type == "light_intensity",
+        Metric.event_ts >= time_threshold
+    ).all()
+    pressure_metrics = db.query(Metric).filter(
+        Metric.metric_type == "pressure",
+        Metric.event_ts >= time_threshold
     ).all()
     
-    return cpu_metrics, memory_metrics
+    return (
+        temperature_metrics,
+        humidity_metrics,
+        soil_moisture_metrics,
+        light_intensity_metrics,
+        pressure_metrics,
+    )
 
 
 def delete_old_metrics(db: Session, days: int = 30) -> int:
@@ -119,7 +164,7 @@ def delete_old_metrics(db: Session, days: int = 30) -> int:
     time_threshold = datetime.utcnow() - timedelta(days=days)
     
     deleted_count = db.query(Metric).filter(
-        Metric.timestamp < time_threshold
+        Metric.event_ts < time_threshold
     ).delete()
     
     db.commit()
@@ -425,7 +470,7 @@ def get_user_accessible_sources(db: Session, user_id: int) -> List[str]:
         iot_devices = db.query(IoTDevice).filter(IoTDevice.is_active == True).all()
         sources.extend([d.source for d in iot_devices])
 
-        metric_sources = db.query(Metric.source).distinct().all()
+        metric_sources = db.query(Metric.sensor_id).distinct().all()
         sources.extend([row[0] for row in metric_sources if row and row[0]])
     else:
         # Regular users see:
@@ -452,7 +497,7 @@ def get_user_accessible_sources(db: Session, user_id: int) -> List[str]:
 
 
 def get_latest_metrics_for_user(db: Session, user_id: int, source: Optional[str] = None) -> tuple:
-    """Get latest values for each metric type, filtered by user's accessible devices
+    """Get latest values for each IoT metric type, filtered by user's accessible devices
     
     Returns None if metric is older than 30 seconds (server considered down)
     """
@@ -472,31 +517,65 @@ def get_latest_metrics_for_user(db: Session, user_id: int, source: Optional[str]
         if source not in accessible_sources:
             return None, None
 
-        latest_cpu = db.query(Metric).filter(
-            Metric.metric_type == "cpu",
-            Metric.source == source,
-            Metric.timestamp >= stale_threshold  # Only return if recent
-        ).order_by(Metric.timestamp.desc()).first()
-
-        latest_memory = db.query(Metric).filter(
-            Metric.metric_type == "memory",
-            Metric.source == source,
-            Metric.timestamp >= stale_threshold  # Only return if recent
-        ).order_by(Metric.timestamp.desc()).first()
+        latest_temperature = db.query(Metric).filter(
+            Metric.metric_type == "temperature",
+            Metric.sensor_id == source,
+            Metric.event_ts >= stale_threshold
+        ).order_by(Metric.event_ts.desc()).first()
+        latest_humidity = db.query(Metric).filter(
+            Metric.metric_type == "humidity",
+            Metric.sensor_id == source,
+            Metric.event_ts >= stale_threshold
+        ).order_by(Metric.event_ts.desc()).first()
+        latest_soil_moisture = db.query(Metric).filter(
+            Metric.metric_type == "soil_moisture",
+            Metric.sensor_id == source,
+            Metric.event_ts >= stale_threshold
+        ).order_by(Metric.event_ts.desc()).first()
+        latest_light_intensity = db.query(Metric).filter(
+            Metric.metric_type == "light_intensity",
+            Metric.sensor_id == source,
+            Metric.event_ts >= stale_threshold
+        ).order_by(Metric.event_ts.desc()).first()
+        latest_pressure = db.query(Metric).filter(
+            Metric.metric_type == "pressure",
+            Metric.sensor_id == source,
+            Metric.event_ts >= stale_threshold
+        ).order_by(Metric.event_ts.desc()).first()
     else:
-        latest_cpu = db.query(Metric).filter(
-            Metric.metric_type == "cpu",
-            Metric.source.in_(accessible_sources),
-            Metric.timestamp >= stale_threshold  # Only return if recent
-        ).order_by(Metric.timestamp.desc()).first()
-
-        latest_memory = db.query(Metric).filter(
-            Metric.metric_type == "memory",
-            Metric.source.in_(accessible_sources),
-            Metric.timestamp >= stale_threshold  # Only return if recent
-        ).order_by(Metric.timestamp.desc()).first()
+        latest_temperature = db.query(Metric).filter(
+            Metric.metric_type == "temperature",
+            Metric.sensor_id.in_(accessible_sources),
+            Metric.event_ts >= stale_threshold
+        ).order_by(Metric.event_ts.desc()).first()
+        latest_humidity = db.query(Metric).filter(
+            Metric.metric_type == "humidity",
+            Metric.sensor_id.in_(accessible_sources),
+            Metric.event_ts >= stale_threshold
+        ).order_by(Metric.event_ts.desc()).first()
+        latest_soil_moisture = db.query(Metric).filter(
+            Metric.metric_type == "soil_moisture",
+            Metric.sensor_id.in_(accessible_sources),
+            Metric.event_ts >= stale_threshold
+        ).order_by(Metric.event_ts.desc()).first()
+        latest_light_intensity = db.query(Metric).filter(
+            Metric.metric_type == "light_intensity",
+            Metric.sensor_id.in_(accessible_sources),
+            Metric.event_ts >= stale_threshold
+        ).order_by(Metric.event_ts.desc()).first()
+        latest_pressure = db.query(Metric).filter(
+            Metric.metric_type == "pressure",
+            Metric.sensor_id.in_(accessible_sources),
+            Metric.event_ts >= stale_threshold
+        ).order_by(Metric.event_ts.desc()).first()
     
-    return latest_cpu, latest_memory
+    return (
+        latest_temperature,
+        latest_humidity,
+        latest_soil_moisture,
+        latest_light_intensity,
+        latest_pressure,
+    )
 
 
 def get_metrics_history_for_user(
@@ -521,15 +600,15 @@ def get_metrics_history_for_user(
 
         metrics = db.query(Metric).filter(
             Metric.metric_type == metric_type,
-            Metric.source == source,
-            Metric.timestamp >= time_threshold
-        ).order_by(Metric.timestamp.asc()).all()
+            Metric.sensor_id == source,
+            Metric.event_ts >= time_threshold
+        ).order_by(Metric.event_ts.asc()).all()
     else:
         metrics = db.query(Metric).filter(
             Metric.metric_type == metric_type,
-            Metric.source.in_(accessible_sources),
-            Metric.timestamp >= time_threshold
-        ).order_by(Metric.timestamp.asc()).all()
+            Metric.sensor_id.in_(accessible_sources),
+            Metric.event_ts >= time_threshold
+        ).order_by(Metric.event_ts.asc()).all()
     
     return metrics
 
@@ -575,17 +654,17 @@ def get_metrics_history_by_date(
 
         metrics = db.query(Metric).filter(
             Metric.metric_type == metric_type,
-            Metric.source == source,
-            Metric.timestamp >= range_start,
-            Metric.timestamp < range_end
-        ).order_by(Metric.timestamp.asc()).all()
+            Metric.sensor_id == source,
+            Metric.event_ts >= range_start,
+            Metric.event_ts < range_end
+        ).order_by(Metric.event_ts.asc()).all()
     else:
         metrics = db.query(Metric).filter(
             Metric.metric_type == metric_type,
-            Metric.source.in_(accessible_sources),
-            Metric.timestamp >= range_start,
-            Metric.timestamp < range_end
-        ).order_by(Metric.timestamp.asc()).all()
+            Metric.sensor_id.in_(accessible_sources),
+            Metric.event_ts >= range_start,
+            Metric.event_ts < range_end
+        ).order_by(Metric.event_ts.asc()).all()
     
     return metrics
 

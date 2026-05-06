@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, Trash2, Edit2, Home, Radio, X, Power, PowerOff, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, Edit2, Home, Radio, X, Power, PowerOff, AlertCircle, Settings } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useDevices } from '../context/DeviceContext'
 import { useAuth } from '../context/AuthContext'
@@ -85,6 +85,27 @@ export default function IoTDeviceManager() {
   const [deviceOwners, setDeviceOwners] = useState({})
   const [chartLastUpdated, setChartLastUpdated] = useState(null)
   const [savingAlerts, setSavingAlerts] = useState(false)
+  const [showNotificationSettings, setShowNotificationSettings] = useState(false)
+  const [showTelegramGuide, setShowTelegramGuide] = useState(false)
+  const [notificationTargets, setNotificationTargets] = useState([])
+  const [newTelegramChatId, setNewTelegramChatId] = useState('')
+  const [newEmail, setNewEmail] = useState('')
+  const [settingsLoading, setSettingsLoading] = useState(false)
+  const getMetricValue = (m) => m?.metric_value ?? m?.value
+  const getMetricTimestamp = (m) => m?.event_ts ?? m?.timestamp
+
+  useEffect(() => {
+    if (isAdmin) return
+    const loadNotificationSettings = async () => {
+      try {
+        const res = await api.get('/api/auth/notifications/targets')
+        setNotificationTargets(res.data?.targets || [])
+      } catch (err) {
+        console.error('Failed to load notification settings:', err)
+      }
+    }
+    loadNotificationSettings()
+  }, [isAdmin])
 
   // Fetch owner information for all devices
   useEffect(() => {
@@ -138,12 +159,12 @@ export default function IoTDeviceManager() {
             if (response.data.data && response.data.data.length > 0) {
               // Sort by timestamp descending and get the first (most recent)
               const latest = response.data.data.sort((a, b) => 
-                new Date(b.timestamp) - new Date(a.timestamp)
+                new Date(getMetricTimestamp(b)) - new Date(getMetricTimestamp(a))
               )[0]
               
               metrics[device.id] = {
-                value: latest.value,
-                timestamp: latest.timestamp
+                value: getMetricValue(latest),
+                timestamp: getMetricTimestamp(latest)
               }
             } else {
               metrics[device.id] = {
@@ -246,7 +267,7 @@ export default function IoTDeviceManager() {
     // Group data by minute
     const minuteGroups = {}
     rawData.forEach(item => {
-      const date = new Date(item.timestamp)
+      const date = new Date(getMetricTimestamp(item))
       // Round to nearest minute
       date.setSeconds(0, 0)
       const minuteKey = date.getTime()
@@ -254,7 +275,7 @@ export default function IoTDeviceManager() {
       if (!minuteGroups[minuteKey]) {
         minuteGroups[minuteKey] = []
       }
-      minuteGroups[minuteKey].push(item.value)
+      minuteGroups[minuteKey].push(getMetricValue(item))
     })
     
     // Calculate average for each minute and format
@@ -287,6 +308,7 @@ export default function IoTDeviceManager() {
       const response = await api.get('/api/metrics/history', {
         params: {
           metric_type: device.device_type,
+          source: device.source,
           minutes: 120 // 2 hours
         }
       })
@@ -296,7 +318,7 @@ export default function IoTDeviceManager() {
       
       // Calculate statistics from original data (not aggregated)
       if (response.data.data && response.data.data.length > 0) {
-        const values = response.data.data.map(d => d.value)
+        const values = response.data.data.map(d => getMetricValue(d))
         const average = values.reduce((a, b) => a + b, 0) / values.length
         const min = Math.min(...values)
         const max = Math.max(...values)
@@ -329,6 +351,7 @@ export default function IoTDeviceManager() {
         const response = await api.get('/api/metrics/history', {
           params: {
             metric_type: selectedDeviceForChart.device_type,
+            source: selectedDeviceForChart.source,
             minutes: 120 // 2 hours
           }
         })
@@ -338,7 +361,7 @@ export default function IoTDeviceManager() {
         
         // Calculate statistics from original data (not aggregated)
         if (response.data.data && response.data.data.length > 0) {
-          const values = response.data.data.map(d => d.value)
+          const values = response.data.data.map(d => getMetricValue(d))
           const average = values.reduce((a, b) => a + b, 0) / values.length
           const min = Math.min(...values)
           const max = Math.max(...values)
@@ -543,6 +566,77 @@ export default function IoTDeviceManager() {
     }
   }
 
+  const loadTargets = async () => {
+    const res = await api.get('/api/auth/notifications/targets')
+    setNotificationTargets(res.data?.targets || [])
+  }
+
+  const addTelegramTarget = async () => {
+    try {
+      setSettingsLoading(true)
+      if (!newTelegramChatId.trim()) {
+        alert('Please enter Telegram Chat ID')
+        return
+      }
+      await api.post('/api/auth/notifications/targets', {
+        target_type: 'telegram',
+        target_value: newTelegramChatId.trim()
+      })
+      setNewTelegramChatId('')
+      await loadTargets()
+      alert('Telegram target added')
+    } catch (err) {
+      alert('Telegram error: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+
+  const addEmailTarget = async () => {
+    try {
+      setSettingsLoading(true)
+      if (!newEmail.trim()) {
+        alert('Please enter email address')
+        return
+      }
+      await api.post('/api/auth/notifications/targets', {
+        target_type: 'email',
+        target_value: newEmail.trim()
+      })
+      setNewEmail('')
+      await loadTargets()
+      alert('Email target added')
+    } catch (err) {
+      alert('Email error: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+
+  const toggleTarget = async (targetId, enabled) => {
+    try {
+      setSettingsLoading(true)
+      await api.patch(`/api/auth/notifications/targets/${targetId}`, { is_enabled: enabled })
+      await loadTargets()
+    } catch (err) {
+      alert('Update target failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+
+  const deleteTarget = async (targetId) => {
+    try {
+      setSettingsLoading(true)
+      await api.delete(`/api/auth/notifications/targets/${targetId}`)
+      await loadTargets()
+    } catch (err) {
+      alert('Delete target failed: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setSettingsLoading(false)
+    }
+  }
+
   const getDeviceTypeColor = (type) => {
     const colors = {
       temperature: 'neon-orange',
@@ -664,14 +758,118 @@ export default function IoTDeviceManager() {
               <h1 className="text-4xl font-bold text-white mb-2">IoT Devices</h1>
               <p className="text-gray-400">Manage your IoT sensors and devices</p>
             </div>
-            <button
-              onClick={() => setShowAddDeviceModal(true)}
-              className="flex items-center gap-2 bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 hover:border-neon-cyan px-4 py-2 rounded-lg transition-all"
-            >
-              <Plus className="w-5 h-5" />
-              Add Device
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowNotificationSettings(!showNotificationSettings)}
+                className="flex items-center gap-2 bg-indigo-500/20 text-indigo-300 border border-indigo-400/40 hover:bg-indigo-500/30 px-4 py-2 rounded-lg transition-all"
+              >
+                <Settings className="w-4 h-4" />
+                Setting
+              </button>
+              <button
+                onClick={() => setShowAddDeviceModal(true)}
+                className="flex items-center gap-2 bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 hover:border-neon-cyan px-4 py-2 rounded-lg transition-all"
+              >
+                <Plus className="w-5 h-5" />
+                Add Device
+              </button>
+            </div>
           </div>
+
+          {showNotificationSettings && (
+            <div className="rounded-xl border border-indigo-400/30 bg-dark-800 p-6">
+              <h3 className="text-lg font-semibold text-white mb-4">Notification Settings</h3>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="rounded-lg border border-cyan-400/30 bg-dark-900/60 p-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <p className="text-cyan-300 font-semibold">Telegram</p>
+                    <button
+                      onClick={() => setShowTelegramGuide((prev) => !prev)}
+                      className="text-xs px-3 py-1 rounded border border-cyan-400/40 text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 transition-all"
+                    >
+                      {showTelegramGuide ? 'Ẩn hướng dẫn' : 'Hướng dẫn tìm Chat ID'}
+                    </button>
+                  </div>
+                  {showTelegramGuide && (
+                    <div className="mb-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 text-sm text-cyan-100">
+                      <p className="font-semibold mb-2">Hướng dẫn tìm Chat ID và bắt đầu:</p>
+                      <p className="mb-1">Bước 1: Mở Telegram và tìm kiếm bot có tên là <span className="font-mono text-cyan-300">@metrics_pulse_test_bot</span> và nhấn bắt đầu.</p>
+                      <p className="mb-1">Bước 2: Tìm kiếm bot có tên là <span className="font-mono text-cyan-300">@Getmyid_bot</span> và nhấn bắt đầu.</p>
+                      <p>Bước 3: Sao chép Chat ID mà bot gửi lại cho bạn.</p>
+                    </div>
+                  )}
+                  <input
+                    type="text"
+                    value={newTelegramChatId}
+                    onChange={(e) => setNewTelegramChatId(e.target.value)}
+                    placeholder="Enter Telegram Chat ID"
+                    className="w-full bg-dark-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-cyan-400 outline-none mb-3"
+                  />
+                  <button
+                    onClick={addTelegramTarget}
+                    disabled={settingsLoading}
+                    className="w-full px-3 py-2 bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 rounded-lg hover:bg-cyan-500/30 disabled:opacity-50 mb-3"
+                  >
+                    Add Telegram Chat ID
+                  </button>
+                  <div className="space-y-2">
+                    {notificationTargets.filter(t => t.target_type === 'telegram').map(t => (
+                      <div key={t.id} className="flex items-center justify-between bg-dark-800 rounded px-3 py-2">
+                        <span className="text-sm text-gray-200">{t.target_value}</span>
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs text-gray-300 flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={!!t.is_enabled}
+                              onChange={(e) => toggleTarget(t.id, e.target.checked)}
+                            />
+                            Enable
+                          </label>
+                          <button onClick={() => deleteTarget(t.id)} className="text-red-400 text-xs">Delete</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-emerald-400/30 bg-dark-900/60 p-4">
+                  <p className="text-emerald-300 font-semibold mb-3">Email</p>
+                  <input
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="Enter email for alerts"
+                    className="w-full bg-dark-800 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-emerald-400 outline-none mb-3"
+                  />
+                  <button
+                    onClick={addEmailTarget}
+                    disabled={settingsLoading}
+                    className="w-full px-3 py-2 bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 rounded-lg hover:bg-emerald-500/30 disabled:opacity-50 mb-3"
+                  >
+                    Add Email
+                  </button>
+                  <div className="space-y-2">
+                    {notificationTargets.filter(t => t.target_type === 'email').map(t => (
+                      <div key={t.id} className="flex items-center justify-between bg-dark-800 rounded px-3 py-2">
+                        <span className="text-sm text-gray-200">{t.target_value}</span>
+                        <div className="flex items-center gap-2">
+                          <label className="text-xs text-gray-300 flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={!!t.is_enabled}
+                              onChange={(e) => toggleTarget(t.id, e.target.checked)}
+                            />
+                            Enable
+                          </label>
+                          <button onClick={() => deleteTarget(t.id)} className="text-red-400 text-xs">Delete</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Devices Grid - Only for Users */}
           {displayDevices.length === 0 ? (

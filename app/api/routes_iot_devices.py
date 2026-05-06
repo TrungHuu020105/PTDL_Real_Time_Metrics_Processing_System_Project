@@ -29,6 +29,14 @@ class UpdateAlertThresholdsRequest(BaseModel):
     upper_threshold: Optional[float] = None  # Upper threshold (values above trigger alert)
 
 
+class UpdateIoTDeviceRequest(BaseModel):
+    """Request schema for updating user-owned IoT device."""
+    name: Optional[str] = None
+    device_type: Optional[str] = None
+    location: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
 # ============== IoT DEVICE MANAGEMENT ==============
 
 @router.post("")
@@ -164,9 +172,7 @@ async def get_my_iot_devices(
 @router.put("/{device_id}")
 async def update_iot_device(
     device_id: int,
-    name: str = None,
-    location: str = None,
-    is_active: bool = None,
+    update_data: UpdateIoTDeviceRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -182,13 +188,24 @@ async def update_iot_device(
             detail="Device not found"
         )
     
-    if name:
-        device.name = name
-    if location is not None:
-        device.location = location
-    if is_active is not None:
-        device.is_active = is_active
-    
+    if update_data.name is not None and update_data.name.strip():
+        device.name = update_data.name.strip()
+    if update_data.device_type is not None and update_data.device_type.strip():
+        device.device_type = update_data.device_type.strip()
+    if update_data.location is not None:
+        device.location = update_data.location
+    if update_data.is_active is not None:
+        device.is_active = update_data.is_active
+
+    # Keep metrics-generation Device row in sync where possible.
+    admin_device = db.query(Device).filter(Device.source == device.source).first()
+    if admin_device:
+        admin_device.name = device.name
+        admin_device.device_type = device.device_type
+        admin_device.location = device.location
+        if update_data.is_active is not None:
+            admin_device.is_active = update_data.is_active
+
     db.commit()
     db.refresh(device)
     

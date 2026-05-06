@@ -7,6 +7,8 @@ import api from '../api'
 
 export default function UserDashboard() {
   const { iotDevices: devices, myServers: servers, createIoTDevice } = useDevices()
+  const inactiveStatuses = new Set(['cancelled', 'canceled', 'terminated', 'expired', 'inactive'])
+  const activeServers = (servers || []).filter(s => !inactiveStatuses.has(String(s?.status || '').toLowerCase()))
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
   const [addingDevice, setAddingDevice] = useState(false)
   const [selectedDeviceId, setSelectedDeviceId] = useState(null)
@@ -164,13 +166,13 @@ export default function UserDashboard() {
             <h2 className="text-lg font-semibold text-white">Servers</h2>
             <Server className="w-6 h-6 text-neon-cyan" />
           </div>
-          <p className="text-5xl font-bold text-neon-cyan mb-4">{servers?.length || 0}</p>
+          <p className="text-5xl font-bold text-neon-cyan mb-4">{activeServers.length}</p>
           <p className="text-sm text-gray-400 mb-4">
-            {servers?.length === 0 
+            {activeServers.length === 0 
               ? 'No servers subscribed' 
-              : servers?.length === 1
+              : activeServers.length === 1
               ? '1 server subscribed'
-              : `${servers?.length} servers subscribed`}
+              : `${activeServers.length} servers subscribed`}
           </p>
           <button
             className="w-full px-4 py-2 bg-gray-700/50 text-gray-400 border border-gray-600 rounded-lg hover:bg-gray-700 transition-all text-sm cursor-not-allowed opacity-50"

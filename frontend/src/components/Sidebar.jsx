@@ -12,7 +12,6 @@ export default function Sidebar({ activeMenu, setActiveMenu, health }) {
         { id: 'dashboard', label: 'Dashboard', icon: Gauge },
         { id: 'iot-devices', label: 'IoT Devices', icon: Thermometer },
         { id: 'servers', label: 'Server Store', icon: Server },
-        { id: 'alerts', label: 'Alerts', icon: AlertCircle },
       ]
     : [
         { id: 'dashboard', label: 'My Dashboard', icon: Gauge },

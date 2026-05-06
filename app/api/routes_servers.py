@@ -766,6 +766,8 @@ async def get_my_subscriptions(
     if not isinstance(remote_items, list):
         remote_items = []
     mine = [r for r in remote_items if r.get("renter_name") == user.username]
+    inactive_statuses = {"cancelled", "canceled", "terminated", "expired", "inactive"}
+    active_mine = [r for r in mine if str(r.get("status", "")).lower() not in inactive_statuses]
     return {
         "servers": [
             {
@@ -779,9 +781,9 @@ async def get_my_subscriptions(
                 "activated_at": r.get("activated_at"),
                 "cancelled_at": r.get("cancelled_at"),
             }
-            for r in mine
+            for r in active_mine
         ],
-        "total": len(mine)
+        "total": len(active_mine)
     }
 
 

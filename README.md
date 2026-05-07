@@ -493,26 +493,24 @@ Cảm ơn toàn bộ bạn bè trong nhóm vì sự cố gắng và dedications!
 
 ---
 
-## Azure SQL Quick Setup
+## PostgreSQL Quick Setup
 
-Hệ thống hiện dùng Azure SQL:
+Hệ thống hiện dùng PostgreSQL:
 
-1. Cài ODBC Driver 18 for SQL Server trên máy chạy backend.
+1. Cài PostgreSQL và tạo database trước (ví dụ `metrics_db`).
 2. Cài dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 3. Mở `.env`, cấu hình các biến DB:
 ```env
-DB_SERVER=<server>.database.windows.net
-DB_PORT=1433
+DB_HOST=<postgres-host>
+DB_PORT=5432
 DB_DATABASE=<database>
 DB_USERNAME=<username>
 DB_PASSWORD=<password>
-DB_DRIVER=ODBC Driver 18 for SQL Server
-DB_ENCRYPT=yes
-DB_TRUST_SERVER_CERTIFICATE=no
-DB_CONNECTION_TIMEOUT=30
+# Optional:
+# DATABASE_URL=postgresql+psycopg2://<username>:<password>@<postgres-host>:5432/<database>
 ```
 4. Khởi chạy backend bình thường, app sẽ đọc cấu hình DB từ các biến trên.
 5. (Tuỳ chọn) migrate dữ liệu cũ từ SQLite:

@@ -506,7 +506,7 @@ def get_latest_metrics_for_user(db: Session, user_id: int, source: Optional[str]
     accessible_sources = get_user_accessible_sources(db, user_id)
     
     if not accessible_sources:
-        return None, None
+        return (None, None, None, None, None)
     
     # Check if metric is fresh (within last 30 seconds)
     vietnam_tz = timezone(timedelta(hours=7))
@@ -515,7 +515,7 @@ def get_latest_metrics_for_user(db: Session, user_id: int, source: Optional[str]
     
     if source:
         if source not in accessible_sources:
-            return None, None
+            return (None, None, None, None, None)
 
         latest_temperature = db.query(Metric).filter(
             Metric.metric_type == "temperature",

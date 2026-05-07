@@ -37,6 +37,20 @@ async def create_alert(
     return db_alert
 
 
+@router.get("/alerts", response_model=AlertListResponse)
+async def get_alerts(
+    hours: int = Query(24, ge=1, le=720, description="Last N hours to fetch alerts"),
+    limit: int = Query(100, ge=1, le=500, description="Maximum number of alerts"),
+    db: Session = Depends(get_db)
+):
+    """Backward-compatible endpoint for dashboards expecting GET /api/alerts."""
+    alerts = crud.get_recent_alerts(db, hours=hours, limit=limit)
+    return {
+        "alerts": alerts,
+        "count": len(alerts)
+    }
+
+
 @router.get("/alerts/recent", response_model=AlertListResponse)
 async def get_recent_alerts(
     hours: int = Query(24, ge=1, le=720, description="Last N hours to fetch alerts"),

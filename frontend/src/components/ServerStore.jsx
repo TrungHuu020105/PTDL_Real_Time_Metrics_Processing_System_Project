@@ -3,10 +3,12 @@ import { Server, Check, ShoppingCart, Zap, Cpu, Activity, X, DollarSign, AlertCi
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useDevices } from '../context/DeviceContext'
 import { useAuth } from '../context/AuthContext'
+import { useNotification } from '../context/NotificationContext'
 import api from '../api'
 
 export default function ServerStore() {
   const { user } = useAuth()
+  const { notify } = useNotification()
   const { availableServers, myServers, loading } = useDevices()
   const [subscribing, setSubscribing] = useState({})
   const [localhostMetrics, setLocalhostMetrics] = useState({ cpu: null, memory: null })
@@ -332,9 +334,9 @@ export default function ServerStore() {
         delete newState[serverId]
         return newState
       })
-      alert(`Price updated to $${newPrice}/month`)
+      notify(`Price updated to $${newPrice}/month`)
     } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setUpdatingServer(null)
     }
@@ -345,9 +347,9 @@ export default function ServerStore() {
       setProcessingRequest(requestId)
       await api.put(`/api/servers/admin/requests/${requestId}/approve`)
       await fetchPendingRequests()
-      alert('Request approved!')
+      notify('Request approved!')
     } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setProcessingRequest(null)
     }
@@ -361,9 +363,9 @@ export default function ServerStore() {
       setProcessingRequest(requestId)
       await api.put(`/api/servers/admin/requests/${requestId}/reject`, { reason })
       await fetchPendingRequests()
-      alert('Request rejected!')
+      notify('Request rejected!')
     } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setProcessingRequest(null)
     }
@@ -422,11 +424,11 @@ export default function ServerStore() {
         price_per_hour: pricePerMonth
       })
       await fetchAllServers()
-      alert('Server metadata updated successfully.')
+      notify('Server metadata updated successfully.')
       closeEditModal()
     } catch (err) {
       console.error('Update error:', err)
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setUpdatingServer(null)
     }
@@ -529,7 +531,7 @@ export default function ServerStore() {
       setRentTimeLeft(RENT_CODE_TIMEOUT_SECONDS)
       setRentModal({ open: true, action: 'rent', server, rentalId: null, challengeId, code })
     } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setRentActionLoading(false)
     }
@@ -564,9 +566,9 @@ export default function ServerStore() {
   }
 
   const confirmCodeAction = async () => {
-    const code = rentCodeInputs.join('')
+    const code = rentCodeInputs.join('').trim()
     if (code.length !== 6) {
-      alert('Vui lòng nhập đủ 6 chữ số')
+      notify('Vui lòng nhập đủ 6 chữ số')
       return
     }
     try {
@@ -575,7 +577,7 @@ export default function ServerStore() {
         await api.post('/api/servers/rent/confirm', { challenge_id: rentModal.challengeId, code })
         closeRentModal()
         await fetchMyRentals()
-        alert('Thuê server thành công')
+        notify('Thuê server thành công')
       } else if (rentModal.action === 'download_key') {
         const response = await api.post('/api/servers/rentals/private-key/confirm', {
           challenge_id: rentModal.challengeId,
@@ -594,7 +596,7 @@ export default function ServerStore() {
         window.URL.revokeObjectURL(url)
         closeRentModal()
         await fetchMyRentals()
-        alert('Tải private key thành công')
+        notify('Tải private key thành công')
       } else if (rentModal.action === 'cancel_rental') {
         await api.post('/api/servers/rentals/cancel/confirm', {
           challenge_id: rentModal.challengeId,
@@ -603,10 +605,25 @@ export default function ServerStore() {
         closeRentModal()
         await fetchMyRentals()
         if (isAdmin) await fetchAllRentals()
-        alert('Đã hủy đăng ký server')
+        notify('Đã hủy đăng ký server')
       }
     } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      const detail = String(err.response?.data?.detail || err.message || '')
+      const normalized = detail.toLowerCase()
+
+      if (normalized.includes('invalid verification code')) {
+        notify('Mã xác nhận không đúng. Vui lòng kiểm tra lại 6 chữ số.')
+      } else if (normalized.includes('challenge expired')) {
+        notify('Mã xác nhận đã hết hạn. Vui lòng thao tác lại để nhận mã mới.')
+      } else if (
+        normalized.includes('useradd') ||
+        normalized.includes('/etc/passwd') ||
+        normalized.includes('permission denied')
+      ) {
+        notify('Mã xác nhận đúng, nhưng server đích đang lỗi phân quyền khi tạo tài khoản VPS. Vui lòng thử lại sau hoặc báo admin kiểm tra máy chủ.')
+      } else {
+        notify('Error: ' + detail)
+      }
     } finally {
       setRentActionLoading(false)
     }
@@ -622,7 +639,7 @@ export default function ServerStore() {
       setRentTimeLeft(RENT_CODE_TIMEOUT_SECONDS)
       setRentModal({ open: true, action: 'cancel_rental', server: null, rentalId, challengeId, code })
     } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setRentActionLoading(false)
     }
@@ -637,7 +654,7 @@ export default function ServerStore() {
       setRentTimeLeft(RENT_CODE_TIMEOUT_SECONDS)
       setRentModal({ open: true, action: 'download_key', server: null, rentalId, challengeId, code })
     } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     }
   }
 
@@ -650,7 +667,7 @@ export default function ServerStore() {
         if (prev <= 1) {
           clearInterval(timer)
           closeRentModal()
-          alert('Mã xác nhận đã hết thời gian. Vui lòng thao tác lại.')
+          notify('Mã xác nhận đã hết thời gian. Vui lòng thao tác lại.')
           return 0
         }
         return prev - 1
@@ -669,11 +686,11 @@ export default function ServerStore() {
         }
       })
       if (response.data) {
-        alert('Subscription request sent! Please wait for admin approval.')
+        notify('Subscription request sent! Please wait for admin approval.')
         await fetchUserRequests()
       }
     } catch (err) {
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setSubscribing(prev => ({ ...prev, [serverId]: false }))
     }
@@ -701,7 +718,7 @@ export default function ServerStore() {
       await handleRequestSubscription(selectedServerForDuration, selectedDuration)
       setShowDurationModal(false)
     } catch (err) {
-      alert('Error: ' + err.message)
+      notify('Error: ' + err.message)
     }
   }
 
@@ -877,7 +894,7 @@ export default function ServerStore() {
                 }}
                 className="px-3 py-2 rounded bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40"
               >
-                Chi tiết
+                Chi ti?t
               </button>
               {rental.private_key_available && (
                 <button
@@ -1159,12 +1176,12 @@ export default function ServerStore() {
                   {localhostMetrics.cpu !== null ? (
                     <>
                       <div className="w-2 h-2 rounded-full bg-neon-green"></div>
-                      <p className="text-sm font-semibold text-neon-green">✓ Có kết nối</p>
+                      <p className="text-sm font-semibold text-neon-green">Có kết nối</p>
                     </>
                   ) : (
                     <>
                       <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                      <p className="text-sm font-semibold text-red-400">✗ Không có kết nối</p>
+                      <p className="text-sm font-semibold text-red-400">Không có kết nối</p>
                     </>
                   )}
                 </div>
@@ -1331,12 +1348,12 @@ export default function ServerStore() {
                           {serverMetrics.cpu !== null ? (
                             <>
                               <div className="w-2 h-2 rounded-full bg-neon-green"></div>
-                              <p className="text-sm font-semibold text-neon-green">✓ Có kết nối</p>
+                              <p className="text-sm font-semibold text-neon-green">Có kết nối</p>
                             </>
                           ) : (
                             <>
                               <div className="w-2 h-2 rounded-full bg-red-500"></div>
-                              <p className="text-sm font-semibold text-red-400">✗ Không có kết nối</p>
+                              <p className="text-sm font-semibold text-red-400">Không có kết nối</p>
                             </>
                           )}
                         </div>
@@ -1674,7 +1691,7 @@ export default function ServerStore() {
             <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-6">
               <p className="text-gray-400 text-sm mb-2">Available Servers</p>
               <p className="text-3xl font-bold text-neon-cyan">
-                {availableServers.filter(s => (adminServerMetrics[s.id]?.cpu ?? null) !== null).length}
+                {(availableServers || []).filter((s) => !getRentalByServer(s.server_id || s.id)).length}
               </p>
             </div>
             <div className="bg-dark-800 border border-neon-green/20 rounded-xl p-6">
@@ -1733,23 +1750,10 @@ export default function ServerStore() {
               )
             }
 
-            // Check if metrics are still loading - if we have servers but no metrics yet, show loading
-            const metricsLoaded = Object.keys(adminServerMetrics).length > 0
-            if (!metricsLoaded && !isAdmin) {
-              return (
-                <div className="text-center py-16">
-                  <p className="text-gray-400">Checking server status...</p>
-                </div>
-              )
-            }
-
-            // Filter: for admin show all, for users show only connected servers
+            // Show all servers in store; connectivity is displayed per-card.
             const filteredServers = serversToDisplay.filter(server => {
-              if (isAdmin) return true
-              // For users: only show connected servers (cpu !== null)
-              const isConnected = (adminServerMetrics[server.id]?.cpu ?? null) !== null
               const myRental = getRentalByServer(server.server_id || server.id)
-              return isConnected && !myRental
+              return !myRental
             })
             
             if (filteredServers.length === 0) {
@@ -2029,7 +2033,7 @@ export default function ServerStore() {
 
           {userViewTab === 'mine' && myRentedServerCards.length === 0 && (
             <div className="mt-10 text-center py-16 border border-gray-700 rounded-xl bg-dark-800/40">
-              <h3 className="text-xl font-semibold text-white mb-2">Bạn chưa thuê server nào</h3>
+              <h3 className="text-xl font-semibold text-white mb-2">B?n chua thuê server nào</h3>
               <p className="text-gray-400">Chuyển qua tab Cửa hàng để chọn server cần thuê.</p>
             </div>
           )}
@@ -2100,7 +2104,7 @@ export default function ServerStore() {
             <h2 className="text-2xl font-bold text-neon-cyan mb-2">
               {rentModal.action === 'rent' ? 'Xác nhận thuê server' : rentModal.action === 'download_key' ? 'Xác nhận tải private key' : 'Xác nhận hủy đăng ký'}
             </h2>
-            <p className="text-gray-400 mb-2">Mã bảo mật: <span className="text-neon-yellow font-bold">{rentModal.code}</span></p>
+            <p className="text-gray-400 mb-2">Mã b?o m?t: <span className="text-neon-yellow font-bold">{rentModal.code}</span></p>
             <p className="text-gray-500 mb-6">
               {rentModal.action === 'rent' ? 'Nhập đúng 6 số để hoàn tất thuê server.' : rentModal.action === 'download_key' ? 'Nhập đúng 6 số để tải lại private key.' : 'Nhập đúng 6 số để xác nhận hủy đăng ký server.'}
             </p>
@@ -2169,7 +2173,7 @@ export default function ServerStore() {
         return (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
             <div className="bg-dark-800 border border-neon-cyan/40 rounded-xl p-8 max-w-2xl w-full mx-4">
-              <h2 className="text-2xl font-bold text-neon-cyan mb-4">Chi tiết server đang thuê</h2>
+              <h2 className="text-2xl font-bold text-neon-cyan mb-4">Chi ti?t server dang thuê</h2>
               <div className="space-y-3 text-gray-200">
                 <div className="flex items-center gap-2">
                   <p>IP: {rental.ip}</p>
@@ -2362,7 +2366,7 @@ export default function ServerStore() {
                 onClick={closeSubscribersModal}
                 className="text-gray-400 hover:text-white transition-colors"
               >
-                ✕
+                ?
               </button>
             </div>
 
@@ -2490,6 +2494,7 @@ export default function ServerStore() {
     </div>
   )
 }
+
 
 
 

@@ -89,7 +89,11 @@ async def dispatch_alert_notifications(alert_id: int):
 
         if tasks:
             results = await asyncio.gather(*tasks, return_exceptions=True)
-            print(f"[NOTIFY] Dispatch results for alert_id={alert_id}: {results}")
+            print(
+                f"[NOTIFY] Dispatch results for alert_id={alert_id} "
+                f"(user_id={owner.id}, telegram_targets={len(telegram_targets)}, email_targets={len(email_targets)}, "
+                f"email_enabled={owner.email_enabled}, fallback_email={owner.notification_email or owner.email}): {results}"
+            )
         else:
             print(f"[NOTIFY] No channels enabled for user_id={owner.id}")
     finally:

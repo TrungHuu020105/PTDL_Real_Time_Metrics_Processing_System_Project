@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+﻿import { useState, useEffect, useRef } from 'react'
 import { Plus, Trash2, Edit2, Home, Radio, X, Power, PowerOff, AlertCircle, Settings } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useDevices } from '../context/DeviceContext'
 import { useAuth } from '../context/AuthContext'
+import { useNotification } from '../context/NotificationContext'
 import AddDeviceModal from './AddDeviceModal'
 import EditAlertThresholdsModal from './EditAlertThresholdsModal'
 import api from '../api'
@@ -10,6 +11,7 @@ import api from '../api'
 export default function IoTDeviceManager() {
   const { iotDevices, allIoTDevices, createIoTDevice, updateIoTDevice, deleteIoTDevice, fetchIoTDevices, fetchAllIoTDevices } = useDevices()
   const { user } = useAuth()
+  const { notify } = useNotification()
   const isAdmin = user?.role === 'admin'
   
   // Use allIoTDevices if admin, otherwise use iotDevices
@@ -398,7 +400,7 @@ export default function IoTDeviceManager() {
       setShowAddDeviceModal(false)
     } catch (err) {
       console.error('Failed to add device:', err)
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setAddingDevice(false)
     }
@@ -424,7 +426,7 @@ export default function IoTDeviceManager() {
       })
       setShowCreateModal(false)
     } catch (err) {
-      alert('Error: ' + err.message)
+      notify('Error: ' + err.message)
     } finally {
       setLoading(false)
     }
@@ -435,7 +437,7 @@ export default function IoTDeviceManager() {
       try {
         await deleteIoTDevice(deviceId)
       } catch (err) {
-        alert('Error: ' + err.message)
+        notify('Error: ' + err.message)
       }
     }
   }
@@ -445,7 +447,7 @@ export default function IoTDeviceManager() {
     try {
       setLoading(true)
       const response = await api.put(`/api/admin/devices/${deviceId}/toggle`)
-      alert(response.data.message || `Device ${response.data.is_active ? 'enabled' : 'disabled'} successfully`)
+      notify(response.data.message || `Device ${response.data.is_active ? 'enabled' : 'disabled'} successfully`)
       
       // Refresh admin devices list
       if (isAdmin && allIoTDevices) {
@@ -458,7 +460,7 @@ export default function IoTDeviceManager() {
       }
     } catch (err) {
       console.error('Error toggling device:', err)
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setLoading(false)
     }
@@ -469,11 +471,11 @@ export default function IoTDeviceManager() {
     try {
       setLoading(true)
       await updateIoTDevice(deviceId, { is_active: !currentStatus })
-      alert(`Device ${!currentStatus ? 'enabled' : 'disabled'} successfully`)
+      notify(`Device ${!currentStatus ? 'enabled' : 'disabled'} successfully`)
       // Devices list will auto-update via context
     } catch (err) {
       console.error('Error toggling IoT device:', err)
-      alert('Error: ' + (err.response?.data?.detail || err.message))
+      notify('Error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setLoading(false)
     }
@@ -483,22 +485,22 @@ export default function IoTDeviceManager() {
   const disconnectIoTDevice = async (deviceId) => {
     try {
       await api.put(`/api/admin/iot-devices/${deviceId}/disconnect`)
-      alert('Device disconnected successfully')
+      notify('Device disconnected successfully')
       // Refresh devices list
       window.location.reload()
     } catch (err) {
-      alert('Error disconnecting device: ' + (err.response?.data?.detail || err.message))
+      notify('Error disconnecting device: ' + (err.response?.data?.detail || err.message))
     }
   }
 
   const reconnectIoTDevice = async (deviceId) => {
     try {
       await api.put(`/api/admin/iot-devices/${deviceId}/reconnect`)
-      alert('Device reconnected successfully')
+      notify('Device reconnected successfully')
       // Refresh devices list
       window.location.reload()
     } catch (err) {
-      alert('Error reconnecting device: ' + (err.response?.data?.detail || err.message))
+      notify('Error reconnecting device: ' + (err.response?.data?.detail || err.message))
     }
   }
 
@@ -506,11 +508,11 @@ export default function IoTDeviceManager() {
     if (confirm('Delete this IoT device? (Admin action)')) {
       try {
         await api.delete(`/api/admin/iot-devices/${deviceId}`)
-        alert('Device deleted successfully')
+        notify('Device deleted successfully')
         // Refresh devices list
         window.location.reload()
       } catch (err) {
-        alert('Error deleting device: ' + (err.response?.data?.detail || err.message))
+        notify('Error deleting device: ' + (err.response?.data?.detail || err.message))
       }
     }
   }
@@ -542,7 +544,7 @@ export default function IoTDeviceManager() {
       
       const response = await api.put(`/api/iot-devices/${selectedDeviceForAlert.id}/alert-thresholds`, thresholdData)
       console.log('Response received:', response.data)
-      alert('✅ ' + response.data.message)
+      notify('âœ… ' + response.data.message)
       setShowAlertThresholdsModal(false)
       
       // Refresh ALL devices to get updated threshold values
@@ -560,7 +562,7 @@ export default function IoTDeviceManager() {
       console.error('Error message:', err.message)
       console.error('Error config:', err.config)
       console.error('Error response:', err.response)
-      alert('Error: ' + (err.response?.data?.detail || err.message || 'Unknown error'))
+      notify('Error: ' + (err.response?.data?.detail || err.message || 'Unknown error'))
     } finally {
       setSavingAlerts(false)
     }
@@ -575,7 +577,7 @@ export default function IoTDeviceManager() {
     try {
       setSettingsLoading(true)
       if (!newTelegramChatId.trim()) {
-        alert('Please enter Telegram Chat ID')
+        notify('Please enter Telegram Chat ID')
         return
       }
       await api.post('/api/auth/notifications/targets', {
@@ -584,9 +586,9 @@ export default function IoTDeviceManager() {
       })
       setNewTelegramChatId('')
       await loadTargets()
-      alert('Telegram target added')
+      notify('Telegram target added')
     } catch (err) {
-      alert('Telegram error: ' + (err.response?.data?.detail || err.message))
+      notify('Telegram error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setSettingsLoading(false)
     }
@@ -596,7 +598,7 @@ export default function IoTDeviceManager() {
     try {
       setSettingsLoading(true)
       if (!newEmail.trim()) {
-        alert('Please enter email address')
+        notify('Please enter email address')
         return
       }
       await api.post('/api/auth/notifications/targets', {
@@ -605,9 +607,9 @@ export default function IoTDeviceManager() {
       })
       setNewEmail('')
       await loadTargets()
-      alert('Email target added')
+      notify('Email target added')
     } catch (err) {
-      alert('Email error: ' + (err.response?.data?.detail || err.message))
+      notify('Email error: ' + (err.response?.data?.detail || err.message))
     } finally {
       setSettingsLoading(false)
     }
@@ -619,7 +621,7 @@ export default function IoTDeviceManager() {
       await api.patch(`/api/auth/notifications/targets/${targetId}`, { is_enabled: enabled })
       await loadTargets()
     } catch (err) {
-      alert('Update target failed: ' + (err.response?.data?.detail || err.message))
+      notify('Update target failed: ' + (err.response?.data?.detail || err.message))
     } finally {
       setSettingsLoading(false)
     }
@@ -631,7 +633,7 @@ export default function IoTDeviceManager() {
       await api.delete(`/api/auth/notifications/targets/${targetId}`)
       await loadTargets()
     } catch (err) {
-      alert('Delete target failed: ' + (err.response?.data?.detail || err.message))
+      notify('Delete target failed: ' + (err.response?.data?.detail || err.message))
     } finally {
       setSettingsLoading(false)
     }
@@ -650,7 +652,7 @@ export default function IoTDeviceManager() {
 
   const getMetricUnit = (type) => {
     const units = {
-      temperature: '°C',
+      temperature: 'Â°C',
       humidity: '%',
       soil_moisture: '%',
       light_intensity: 'lux',
@@ -793,8 +795,8 @@ export default function IoTDeviceManager() {
                   {showTelegramGuide && (
                     <div className="mb-3 rounded-lg border border-cyan-500/20 bg-cyan-500/5 p-3 text-sm text-cyan-100">
                       <p className="font-semibold mb-2">Hướng dẫn tìm Chat ID và bắt đầu:</p>
-                      <p className="mb-1">Bước 1: Mở Telegram và tìm kiếm bot có tên là <span className="font-mono text-cyan-300">@metrics_pulse_test_bot</span> và nhấn bắt đầu.</p>
-                      <p className="mb-1">Bước 2: Tìm kiếm bot có tên là <span className="font-mono text-cyan-300">@Getmyid_bot</span> và nhấn bắt đầu.</p>
+                      <p className="mb-1">Bước 1: Mở Telegram và tìm bot có tên <span className="font-mono text-cyan-300">@metrics_pulse_test_bot</span>, sau đó nhấn bắt đầu.</p>
+                      <p className="mb-1">Bước 2: Tìm bot có tên <span className="font-mono text-cyan-300">@Getmyid_bot</span> và nhấn bắt đầu.</p>
                       <p>Bước 3: Sao chép Chat ID mà bot gửi lại cho bạn.</p>
                     </div>
                   )}
@@ -944,7 +946,7 @@ export default function IoTDeviceManager() {
                       </div>
                       {alertStatus.triggered && (
                         <div className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-red-500/30 text-red-400">
-                          🚨 OUT OF RANGE
+                          ðŸš¨ OUT OF RANGE
                         </div>
                       )}
                     </div>
@@ -959,7 +961,7 @@ export default function IoTDeviceManager() {
                               ? 'bg-red-500/20 border-red-500/60'
                               : 'bg-blue-500/10 border-blue-500/30'
                           }`}>
-                            <p className="text-xs text-blue-400/70 font-semibold">⬇️ Min</p>
+                            <p className="text-xs text-blue-400/70 font-semibold">â¬‡ï¸ Min</p>
                             <p className="text-sm font-mono text-blue-300">{
                               typeof device.lower_threshold === 'number' 
                                 ? device.lower_threshold.toFixed(1) 
@@ -973,7 +975,7 @@ export default function IoTDeviceManager() {
                               ? 'bg-red-500/20 border-red-500/60'
                               : 'bg-green-500/10 border-green-500/30'
                           }`}>
-                            <p className="text-xs text-green-400/70 font-semibold">⬆️ Max</p>
+                            <p className="text-xs text-green-400/70 font-semibold">â¬†ï¸ Max</p>
                             <p className="text-sm font-mono text-green-300">{
                               typeof device.upper_threshold === 'number' 
                                 ? device.upper_threshold.toFixed(1) 
@@ -1077,11 +1079,11 @@ export default function IoTDeviceManager() {
                   onChange={(e) => setFormData({...formData, device_type: e.target.value})}
                   className="w-full bg-dark-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-neon-cyan outline-none"
                 >
-                  <option value="temperature">🌡️  Temperature</option>
-                  <option value="humidity">💧 Humidity</option>
-                  <option value="soil_moisture">🌱 Soil Moisture</option>
-                  <option value="light_intensity">☀️  Light Intensity</option>
-                  <option value="pressure">📊 Pressure</option>
+                  <option value="temperature">ðŸŒ¡ï¸  Temperature</option>
+                  <option value="humidity">ðŸ’§ Humidity</option>
+                  <option value="soil_moisture">ðŸŒ± Soil Moisture</option>
+                  <option value="light_intensity">â˜€ï¸  Light Intensity</option>
+                  <option value="pressure">ðŸ“Š Pressure</option>
                 </select>
               </div>
 
@@ -1283,3 +1285,4 @@ export default function IoTDeviceManager() {
     </div>
   )
 }
+

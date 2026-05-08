@@ -8,6 +8,7 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('user')
   const [error, setError] = useState('')
+  const [successMessage, setSuccessMessage] = useState('')
   const [loading, setLoading] = useState(false)
 
   const { login, register } = useAuth()
@@ -15,6 +16,7 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    setSuccessMessage('')
     setLoading(true)
 
     try {
@@ -33,11 +35,13 @@ export default function Login() {
         }
         const result = await register(username, email, password, role)
         if (result.success) {
-          // After successful registration, auto-login
-          const loginResult = await login(username, password)
-          if (!loginResult.success) {
-            setError(loginResult.message)
-          }
+          const waitingApprovalMessage = role === 'admin'
+            ? 'Đăng ký thành công. Bạn có thể đăng nhập ngay bây giờ.'
+            : 'Đăng ký thành công. Yêu cầu của bạn đã được gửi và đang chờ quản trị viên phê duyệt.'
+
+          setSuccessMessage(waitingApprovalMessage)
+          setIsLogin(true)
+          setPassword('')
         } else {
           setError(result.message)
         }
@@ -66,6 +70,7 @@ export default function Login() {
               onClick={() => {
                 setIsLogin(true)
                 setError('')
+                setSuccessMessage('')
               }}
               className={`flex-1 py-2 px-4 rounded text-sm font-semibold transition-all ${
                 isLogin
@@ -79,6 +84,7 @@ export default function Login() {
               onClick={() => {
                 setIsLogin(false)
                 setError('')
+                setSuccessMessage('')
               }}
               className={`flex-1 py-2 px-4 rounded text-sm font-semibold transition-all ${
                 !isLogin
@@ -96,6 +102,12 @@ export default function Login() {
             {error && (
               <div className="p-3 bg-red-500/20 border border-red-500/50 rounded text-red-400 text-sm">
                 {error}
+              </div>
+            )}
+
+            {successMessage && (
+              <div className="p-3 bg-emerald-500/20 border border-emerald-500/50 rounded text-emerald-300 text-sm">
+                {successMessage}
               </div>
             )}
 

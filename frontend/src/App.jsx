@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { DeviceProvider } from './context/DeviceContext'
+import { NotificationProvider } from './context/NotificationContext'
 import api from './api'
 import Sidebar from './components/Sidebar'
 import Dashboard from './components/Dashboard'
@@ -95,10 +96,12 @@ function AppContent() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <DeviceProvider>
-        <AppContent />
-      </DeviceProvider>
-    </AuthProvider>
+    <NotificationProvider>
+      <AuthProvider>
+        <DeviceProvider>
+          <AppContent />
+        </DeviceProvider>
+      </AuthProvider>
+    </NotificationProvider>
   )
 }

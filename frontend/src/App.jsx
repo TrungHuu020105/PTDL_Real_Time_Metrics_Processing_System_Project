@@ -15,6 +15,7 @@ import Alerts from './components/Alerts'
 import AdminPanel from './components/AdminPanel'
 import ClientMonitor from './components/ClientMonitor'
 import ServerStore from './components/ServerStore'
+import SupportChat from './components/SupportChat'
 import Login from './components/Login'
 
 function AppContent() {
@@ -63,6 +64,8 @@ function AppContent() {
         return <ClientMonitor />
       case 'admin-panel':
         return <AdminPanel />
+      case 'support-chat':
+        return <SupportChat />
       default:
         // Default: admin gets dashboard, users get IoT devices (UserDashboard)
         return user?.role === 'admin' ? <AdminDashboard /> : <UserDashboard />

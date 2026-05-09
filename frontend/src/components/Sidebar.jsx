@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { BarChart3, Cpu, Zap, Activity, Gauge, AlertCircle, Wifi, LogOut, Settings, Monitor, ChevronDown, Plus, Server, Thermometer, Database } from 'lucide-react'
+import { BarChart3, Cpu, Zap, Activity, Gauge, AlertCircle, Wifi, LogOut, Settings, Monitor, ChevronDown, Plus, Server, Thermometer, Database, MessageCircle } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useDevices } from '../context/DeviceContext'
 
@@ -12,12 +12,14 @@ export default function Sidebar({ activeMenu, setActiveMenu, health }) {
         { id: 'dashboard', label: 'Dashboard', icon: Gauge },
         { id: 'iot-devices', label: 'IoT Devices', icon: Thermometer },
         { id: 'servers', label: 'Server Store', icon: Server },
+        { id: 'support-chat', label: 'Customer Chat', icon: MessageCircle },
       ]
     : [
         { id: 'dashboard', label: 'My Dashboard', icon: Gauge },
         { id: 'iot-devices', label: 'IoT Devices', icon: Thermometer },
         { id: 'servers', label: 'Server Store', icon: Server },
         { id: 'alerts', label: 'Alerts', icon: AlertCircle },
+        { id: 'support-chat', label: 'Support Chat', icon: MessageCircle },
       ]
 
   const adminMenuItems = [

@@ -255,3 +255,86 @@ class UserDevicePermissionResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============== CHAT SCHEMAS ==============
+
+class ChatConversationResponse(BaseModel):
+    id: int
+    user_id: int
+    assigned_admin_id: Optional[int] = None
+    status: str
+    subject: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    last_message_preview: Optional[str] = None
+    unread_for_user: int = 0
+    unread_for_admin: int = 0
+
+    class Config:
+        from_attributes = True
+
+
+class ChatMessageResponse(BaseModel):
+    id: int
+    conversation_id: int
+    sender_type: str
+    sender_id: Optional[int] = None
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ChatSendRequest(BaseModel):
+    conversation_id: Optional[int] = None
+    message: str = Field(..., min_length=1, max_length=4000)
+
+
+class ChatEscalateRequest(BaseModel):
+    conversation_id: Optional[int] = None
+    reason: Optional[str] = Field(default=None, max_length=1000)
+
+
+class ChatAdminReplyRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=4000)
+
+
+class ChatConversationListResponse(BaseModel):
+    conversations: List[ChatConversationResponse]
+    count: int
+
+
+class ChatMessagesListResponse(BaseModel):
+    conversation: ChatConversationResponse
+    messages: List[ChatMessageResponse]
+    count: int
+
+
+class ChatIssueTemplateCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    sort_order: int = 0
+    is_active: bool = True
+
+
+class ChatIssueTemplateUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    description: Optional[str] = Field(default=None, max_length=1000)
+    sort_order: Optional[int] = None
+    is_active: Optional[bool] = None
+
+
+class ChatIssueTemplateResponse(BaseModel):
+    id: int
+    title: str
+    description: Optional[str] = None
+    is_active: bool
+    sort_order: int
+    created_by: Optional[int] = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True

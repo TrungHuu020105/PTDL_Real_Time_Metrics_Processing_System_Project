@@ -3,7 +3,19 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from sqlalchemy.orm import Session
-from app.models import Metric, Alert, User, Device, UserDevicePermission, IoTDevice, ServerSubscriptionRequest, ServerSubscription
+from app.models import (
+    Metric,
+    Alert,
+    User,
+    Device,
+    UserDevicePermission,
+    IoTDevice,
+    ServerSubscriptionRequest,
+    ServerSubscription,
+    ChatConversation,
+    ChatMessage,
+    ChatIssueTemplate,
+)
 from app.schemas import MetricCreate, AlertCreate, UserRegister, DeviceCreate
 
 
@@ -748,3 +760,159 @@ def get_user_subscription_requests(db: Session, user_id: int) -> List[ServerSubs
     return db.query(ServerSubscriptionRequest).filter(
         ServerSubscriptionRequest.user_id == user_id
     ).order_by(ServerSubscriptionRequest.requested_at.desc()).all()
+
+
+# ============== CHAT SUPPORT ==============
+
+def create_chat_conversation(
+    db: Session,
+    user_id: int,
+    status: str = "bot_active",
+    subject: Optional[str] = None,
+) -> ChatConversation:
+    now = datetime.now(timezone(timedelta(hours=7)))
+    row = ChatConversation(
+        user_id=user_id,
+        status=status,
+        subject=subject,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def get_chat_conversation(db: Session, conversation_id: int) -> Optional[ChatConversation]:
+    return db.query(ChatConversation).filter(ChatConversation.id == conversation_id).first()
+
+
+def get_latest_user_chat_conversation(db: Session, user_id: int) -> Optional[ChatConversation]:
+    return (
+        db.query(ChatConversation)
+        .filter(ChatConversation.user_id == user_id)
+        .order_by(ChatConversation.updated_at.desc())
+        .first()
+    )
+
+
+def list_user_chat_conversations(db: Session, user_id: int) -> List[ChatConversation]:
+    return (
+        db.query(ChatConversation)
+        .filter(ChatConversation.user_id == user_id)
+        .order_by(ChatConversation.updated_at.desc())
+        .all()
+    )
+
+
+def list_admin_chat_conversations(db: Session, status_filter: Optional[str] = None) -> List[ChatConversation]:
+    query = db.query(ChatConversation)
+    if status_filter and status_filter != "all":
+        query = query.filter(ChatConversation.status == status_filter)
+    return query.order_by(ChatConversation.updated_at.desc()).all()
+
+
+def update_chat_conversation_status(
+    db: Session,
+    conversation: ChatConversation,
+    status: str,
+    assigned_admin_id: Optional[int] = None,
+) -> ChatConversation:
+    conversation.status = status
+    if assigned_admin_id is not None:
+        conversation.assigned_admin_id = assigned_admin_id
+    conversation.updated_at = datetime.now(timezone(timedelta(hours=7)))
+    db.commit()
+    db.refresh(conversation)
+    return conversation
+
+
+def create_chat_message(
+    db: Session,
+    conversation_id: int,
+    sender_type: str,
+    content: str,
+    sender_id: Optional[int] = None,
+) -> ChatMessage:
+    now = datetime.now(timezone(timedelta(hours=7)))
+    row = ChatMessage(
+        conversation_id=conversation_id,
+        sender_type=sender_type,
+        sender_id=sender_id,
+        content=content,
+        created_at=now,
+    )
+    db.add(row)
+
+    conversation = get_chat_conversation(db, conversation_id)
+    if conversation:
+        conversation.updated_at = now
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def list_chat_messages(db: Session, conversation_id: int) -> List[ChatMessage]:
+    return (
+        db.query(ChatMessage)
+        .filter(ChatMessage.conversation_id == conversation_id)
+        .order_by(ChatMessage.created_at.asc())
+        .all()
+    )
+
+
+def list_chat_issue_templates(db: Session, active_only: bool = True) -> List[ChatIssueTemplate]:
+    query = db.query(ChatIssueTemplate)
+    if active_only:
+        query = query.filter(ChatIssueTemplate.is_active == True)
+    return query.order_by(ChatIssueTemplate.sort_order.asc(), ChatIssueTemplate.id.asc()).all()
+
+
+def get_chat_issue_template(db: Session, template_id: int) -> Optional[ChatIssueTemplate]:
+    return db.query(ChatIssueTemplate).filter(ChatIssueTemplate.id == template_id).first()
+
+
+def create_chat_issue_template(
+    db: Session,
+    title: str,
+    description: Optional[str],
+    created_by: Optional[int],
+    sort_order: int = 0,
+    is_active: bool = True,
+) -> ChatIssueTemplate:
+    now = datetime.now(timezone(timedelta(hours=7)))
+    row = ChatIssueTemplate(
+        title=title.strip(),
+        description=(description or "").strip() or None,
+        is_active=is_active,
+        sort_order=sort_order,
+        created_by=created_by,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def update_chat_issue_template(db: Session, row: ChatIssueTemplate, data: dict) -> ChatIssueTemplate:
+    if "title" in data and data["title"] is not None:
+        row.title = data["title"].strip()
+    if "description" in data:
+        value = (data["description"] or "").strip()
+        row.description = value or None
+    if "sort_order" in data and data["sort_order"] is not None:
+        row.sort_order = int(data["sort_order"])
+    if "is_active" in data and data["is_active"] is not None:
+        row.is_active = bool(data["is_active"])
+    row.updated_at = datetime.now(timezone(timedelta(hours=7)))
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+def delete_chat_issue_template(db: Session, row: ChatIssueTemplate) -> None:
+    db.delete(row)
+    db.commit()

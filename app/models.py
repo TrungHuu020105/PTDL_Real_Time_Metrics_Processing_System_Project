@@ -197,3 +197,51 @@ class ServerSubscriptionRequest(Base):
 
     def __repr__(self):
         return f"<ServerSubscriptionRequest(user_id={self.user_id}, server_id={self.server_id}, duration={self.subscription_duration_months}m, status={self.status})>"
+
+
+class ChatConversation(Base):
+    """Conversation between user and bot/admin support."""
+    __tablename__ = "chat_conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, nullable=False, index=True)
+    assigned_admin_id = Column(Integer, nullable=True, index=True)
+    status = Column(String(30), nullable=False, default="bot_active", index=True)
+    subject = Column(String(255), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False, index=True)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<ChatConversation(id={self.id}, user_id={self.user_id}, status={self.status})>"
+
+
+class ChatMessage(Base):
+    """Message in a chat conversation."""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, nullable=False, index=True)
+    sender_type = Column(String(20), nullable=False, index=True)  # user | bot | admin | system
+    sender_id = Column(Integer, nullable=True, index=True)
+    content = Column(String(4000), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False, index=True)
+
+    def __repr__(self):
+        return f"<ChatMessage(conversation_id={self.conversation_id}, sender_type={self.sender_type})>"
+
+
+class ChatIssueTemplate(Base):
+    """Admin-managed common issues shown to users in support chat."""
+    __tablename__ = "chat_issue_templates"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(String(1000), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    sort_order = Column(Integer, default=0, nullable=False)
+    created_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False)
+
+    def __repr__(self):
+        return f"<ChatIssueTemplate(id={self.id}, title={self.title}, active={self.is_active})>"

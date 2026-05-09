@@ -1,8 +1,19 @@
 export const VN_TIMEZONE = 'Asia/Ho_Chi_Minh'
 
+const ISO_NO_TZ_REGEX = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(\.\d+)?$/
+
 export const toDateSafe = (value) => {
   if (value instanceof Date) return value
   if (value === null || value === undefined) return null
+  if (typeof value === 'string') {
+    const normalized = value.trim()
+    // Backend often returns naive timestamps. Treat them as VN local time.
+    if (ISO_NO_TZ_REGEX.test(normalized)) {
+      const asVN = `${normalized.replace(' ', 'T')}+07:00`
+      const vnDate = new Date(asVN)
+      if (!Number.isNaN(vnDate.getTime())) return vnDate
+    }
+  }
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? null : date
 }
@@ -41,4 +52,3 @@ export const formatVNDateTime = (value, withSeconds = true) => {
 }
 
 export const getVNDateInputValue = () => formatVNDate(new Date())
-

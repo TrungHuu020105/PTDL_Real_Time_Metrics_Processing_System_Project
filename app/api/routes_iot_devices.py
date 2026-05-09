@@ -8,8 +8,14 @@ from app.database import get_db
 from app.models import IoTDevice, User, Device, UserDevicePermission
 from app.api.routes_auth import get_current_user
 from app import crud
+from app.services.weather_service import geocode_location
 
 router = APIRouter(prefix="/api/iot-devices", tags=["iot-devices"])
+
+
+def _normalize_environment_type(value: Optional[str]) -> str:
+    env = (value or "indoor").strip().lower()
+    return "outdoor" if env == "outdoor" else "indoor"
 
 
 # ============== SCHEMAS ==============
@@ -20,6 +26,13 @@ class CreateIoTDeviceRequest(BaseModel):
     device_type: str
     source: str
     location: str = None
+    environment_type: str = "indoor"  # indoor | outdoor
+    location_query: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    task_description: Optional[str] = None
+    priority_level: Optional[str] = None
+    action_hint: Optional[str] = None
 
 
 class UpdateAlertThresholdsRequest(BaseModel):
@@ -35,6 +48,17 @@ class UpdateIoTDeviceRequest(BaseModel):
     device_type: Optional[str] = None
     location: Optional[str] = None
     is_active: Optional[bool] = None
+    environment_type: Optional[str] = None
+    location_query: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    task_description: Optional[str] = None
+    priority_level: Optional[str] = None
+    action_hint: Optional[str] = None
+
+
+class GeocodeRequest(BaseModel):
+    location_query: str
 
 
 # ============== IoT DEVICE MANAGEMENT ==============
@@ -56,6 +80,19 @@ async def create_iot_device(
                 detail=f"You already have a device with source '{device_data.source}'. Each sensor can only be used once per user."
             )
         
+        environment_type = _normalize_environment_type(device_data.environment_type)
+        location_query = (device_data.location_query or "").strip() or None
+        latitude = device_data.latitude
+        longitude = device_data.longitude
+        timezone_name = None
+
+        if environment_type == "outdoor" and (latitude is None or longitude is None) and location_query:
+            geo = geocode_location(location_query)
+            if geo:
+                latitude = geo.latitude
+                longitude = geo.longitude
+                timezone_name = geo.timezone
+
         # Step 1: Create IoTDevice (user-owned view)
         print(f"[DEBUG] Creating IoTDevice: {device_data.name} by user {user.id}")
         iot_device = IoTDevice(
@@ -64,6 +101,14 @@ async def create_iot_device(
             device_type=device_data.device_type,
             source=device_data.source,
             location=device_data.location,
+            environment_type=environment_type,
+            location_query=location_query,
+            latitude=latitude,
+            longitude=longitude,
+            timezone_name=timezone_name,
+            task_description=(device_data.task_description or "").strip() or None,
+            priority_level=(device_data.priority_level or "").strip().lower() or None,
+            action_hint=(device_data.action_hint or "").strip() or None,
             is_active=True,
             alert_enabled=False,
             lower_threshold=None,
@@ -121,6 +166,14 @@ async def create_iot_device(
             "device_type": iot_device.device_type,
             "source": iot_device.source,
             "location": iot_device.location,
+            "environment_type": iot_device.environment_type,
+            "location_query": iot_device.location_query,
+            "latitude": iot_device.latitude,
+            "longitude": iot_device.longitude,
+            "timezone_name": iot_device.timezone_name,
+            "task_description": iot_device.task_description,
+            "priority_level": iot_device.priority_level,
+            "action_hint": iot_device.action_hint,
             "is_active": iot_device.is_active,
             "alert_enabled": iot_device.alert_enabled,
             "lower_threshold": iot_device.lower_threshold,
@@ -157,6 +210,14 @@ async def get_my_iot_devices(
                 "device_type": d.device_type,
                 "source": d.source,
                 "location": d.location,
+                "environment_type": d.environment_type,
+                "location_query": d.location_query,
+                "latitude": d.latitude,
+                "longitude": d.longitude,
+                "timezone_name": d.timezone_name,
+                "task_description": d.task_description,
+                "priority_level": d.priority_level,
+                "action_hint": d.action_hint,
                 "is_active": d.is_active,
                 "alert_enabled": d.alert_enabled,
                 "lower_threshold": d.lower_threshold,
@@ -196,6 +257,31 @@ async def update_iot_device(
         device.location = update_data.location
     if update_data.is_active is not None:
         device.is_active = update_data.is_active
+    if update_data.environment_type is not None:
+        device.environment_type = _normalize_environment_type(update_data.environment_type)
+    if update_data.location_query is not None:
+        device.location_query = update_data.location_query.strip() or None
+    if update_data.latitude is not None:
+        device.latitude = update_data.latitude
+    if update_data.longitude is not None:
+        device.longitude = update_data.longitude
+    if update_data.task_description is not None:
+        device.task_description = update_data.task_description.strip() or None
+    if update_data.priority_level is not None:
+        device.priority_level = update_data.priority_level.strip().lower() or None
+    if update_data.action_hint is not None:
+        device.action_hint = update_data.action_hint.strip() or None
+
+    if (
+        device.environment_type == "outdoor"
+        and (device.latitude is None or device.longitude is None)
+        and device.location_query
+    ):
+        geo = geocode_location(device.location_query)
+        if geo:
+            device.latitude = geo.latitude
+            device.longitude = geo.longitude
+            device.timezone_name = geo.timezone
 
     # Keep metrics-generation Device row in sync where possible.
     admin_device = db.query(Device).filter(Device.source == device.source).first()
@@ -215,6 +301,14 @@ async def update_iot_device(
         "device_type": device.device_type,
         "source": device.source,
         "location": device.location,
+        "environment_type": device.environment_type,
+        "location_query": device.location_query,
+        "latitude": device.latitude,
+        "longitude": device.longitude,
+        "timezone_name": device.timezone_name,
+        "task_description": device.task_description,
+        "priority_level": device.priority_level,
+        "action_hint": device.action_hint,
         "is_active": device.is_active,
         "alert_enabled": device.alert_enabled,
         "lower_threshold": device.lower_threshold,
@@ -293,4 +387,22 @@ async def update_alert_thresholds(
         "lower_threshold": device.lower_threshold,
         "upper_threshold": device.upper_threshold,
         "message": "✅ Alert thresholds updated successfully"
+    }
+
+@router.post("/geocode")
+async def geocode_sensor_location(
+    payload: GeocodeRequest,
+    user: User = Depends(get_current_user),
+):
+    """Resolve a location string to lat/lon for outdoor sensors."""
+    geo = geocode_location(payload.location_query)
+    if not geo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Location not found")
+    return {
+        "name": geo.name,
+        "country": geo.country,
+        "admin1": geo.admin1,
+        "timezone": geo.timezone,
+        "latitude": geo.latitude,
+        "longitude": geo.longitude,
     }

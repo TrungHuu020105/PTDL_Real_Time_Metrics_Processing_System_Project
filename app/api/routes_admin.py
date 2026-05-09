@@ -316,6 +316,14 @@ async def get_all_iot_devices(admin: User = Depends(verify_admin), db: Session =
                 "device_type": d.device_type,
                 "source": d.source,
                 "location": d.location,
+                "environment_type": d.environment_type,
+                "location_query": d.location_query,
+                "latitude": d.latitude,
+                "longitude": d.longitude,
+                "timezone_name": d.timezone_name,
+                "task_description": d.task_description,
+                "priority_level": d.priority_level,
+                "action_hint": d.action_hint,
                 "is_active": d.is_active,
                 "created_at": d.created_at
             }

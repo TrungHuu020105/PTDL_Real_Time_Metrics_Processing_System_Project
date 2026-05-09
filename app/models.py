@@ -37,7 +37,7 @@ class Alert(Base):
     threshold = Column(Float, nullable=False)  # Threshold that was exceeded
     message = Column(String(255), nullable=False)  # Alert message
     source = Column(String(100), nullable=False, default="system")  # Source of the metric
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), index=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, index=True, nullable=False)
     resolved_at = Column(DateTime, nullable=True)  # When alert was resolved (if applicable)
 
     # Composite index for efficient querying
@@ -126,6 +126,14 @@ class IoTDevice(Base):
     device_type = Column(String(50), nullable=False)  # temperature, humidity, soil_moisture, light_intensity, pressure
     source = Column(String(100), unique=True, nullable=False, index=True)  # Unique identifier for metrics
     location = Column(String(255), nullable=True)  # Physical location
+    environment_type = Column(String(20), nullable=False, default="indoor")  # indoor | outdoor
+    location_query = Column(String(255), nullable=True)  # Raw user location string for geocoding/weather
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    timezone_name = Column(String(64), nullable=True)
+    task_description = Column(String(500), nullable=True)
+    priority_level = Column(String(20), nullable=True)  # low | medium | high
+    action_hint = Column(String(500), nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     
     # Alert threshold fields - upper and lower bounds

@@ -25,6 +25,18 @@ router = APIRouter(prefix="/api", tags=["metrics"])
 IOT_TYPES = {"temperature", "humidity", "soil_moisture", "light_intensity", "pressure"}
 
 
+def _serialize_metric(metric) -> dict:
+    return {
+        "id": metric.id,
+        "event_ts": metric.event_ts,
+        "sensor_id": metric.sensor_id,
+        "location": metric.location,
+        "metric_type": metric.metric_type,
+        "metric_value": metric.metric_value,
+        "unit": metric.unit,
+    }
+
+
 @router.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint"""
@@ -41,7 +53,7 @@ async def create_metric(
 ):
     """Create a single IoT metric record."""
     db_metric = crud.create_metric(db, metric)
-    return db_metric
+    return _serialize_metric(db_metric)
 
 
 @router.post("/metrics/bulk", response_model=List[MetricResponse], status_code=201)
@@ -51,7 +63,7 @@ async def create_metrics_bulk(
 ):
     """Create multiple IoT metric records at once."""
     db_metrics = crud.create_metrics_bulk(db, bulk_data.metrics)
-    return db_metrics
+    return [_serialize_metric(m) for m in db_metrics]
 
 
 @router.get("/metrics/latest", response_model=LatestMetricsResponse)
@@ -106,7 +118,7 @@ async def get_metrics_history(
 
     return {
         "metric_type": metric_type,
-        "data": metrics,
+        "data": [_serialize_metric(m) for m in metrics],
         "count": len(metrics)
     }
 
@@ -147,7 +159,7 @@ async def get_metrics_history_by_date(
 
     return {
         "metric_type": metric_type,
-        "data": metrics,
+        "data": [_serialize_metric(m) for m in metrics],
         "count": len(metrics)
     }
 

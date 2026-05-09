@@ -25,6 +25,8 @@ except ImportError:
 # Import sensor generation logic
 from generate_iot_data import IoTDataGenerator
 
+DEFAULT_TIMEZONE = "Asia/Ho_Chi_Minh"
+
 
 class LiveIoTStreamer:
     """Stream live sensor data to dashboard without database save"""
@@ -85,7 +87,8 @@ class LiveIoTStreamer:
             print(f"[{timestamp}] Batch #{self.batch_count} | "
                   f"Generated: {total_generated} | "
                   f"DB-Worthy: {total_saved} | "
-                  f"Realtime-Only: {total_dropped}")
+                  f"Realtime-Only: {total_dropped} | "
+                  f"Timezone: {DEFAULT_TIMEZONE}")
             
             # Print detail per sensor
             for metric in metrics_to_send["metrics"]:

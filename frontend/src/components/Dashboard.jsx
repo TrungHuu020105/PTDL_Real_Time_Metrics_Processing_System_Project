@@ -4,6 +4,7 @@ import GaugeChart from './GaugeChart'
 import MetricCard from './MetricCard'
 import api from '../api'
 import { checkMetricAlert } from '../utils/alertUtils'
+import { formatVNTime } from '../utils/vnTime'
 
 export default function Dashboard() {
   const [data, setData] = useState({
@@ -102,7 +103,7 @@ export default function Dashboard() {
   }, [])
 
   const formatTime = (date) => {
-    return date.toLocaleTimeString('vi-VN')
+    return formatVNTime(date, true)
   }
 
   return (

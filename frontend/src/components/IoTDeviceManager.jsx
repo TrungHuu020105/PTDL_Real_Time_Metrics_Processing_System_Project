@@ -7,6 +7,7 @@ import { useNotification } from '../context/NotificationContext'
 import AddDeviceModal from './AddDeviceModal'
 import EditAlertThresholdsModal from './EditAlertThresholdsModal'
 import api from '../api'
+import { formatVNTime } from '../utils/vnTime'
 
 export default function IoTDeviceManager() {
   const { iotDevices, allIoTDevices, createIoTDevice, updateIoTDevice, deleteIoTDevice, fetchIoTDevices, fetchAllIoTDevices } = useDevices()
@@ -65,9 +66,40 @@ export default function IoTDeviceManager() {
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
   const [showChartModal, setShowChartModal] = useState(false)
   const [showAlertThresholdsModal, setShowAlertThresholdsModal] = useState(false)
+  const [showSensorContextModal, setShowSensorContextModal] = useState(false)
   const [selectedDeviceForChart, setSelectedDeviceForChart] = useState(null)
   const [selectedDeviceForAlert, setSelectedDeviceForAlert] = useState(null)
+  const [selectedDeviceForContext, setSelectedDeviceForContext] = useState(null)
   const [editingId, setEditingId] = useState(null)
+  const [sensorContextForm, setSensorContextForm] = useState({
+    environment_type: 'indoor',
+    location_query: '',
+    task_description: '',
+    priority_level: 'medium',
+    action_hint: '',
+  })
+  const [savingSensorContext, setSavingSensorContext] = useState(false)
+  const [checkingContextLocation, setCheckingContextLocation] = useState(false)
+  const [contextLocationCheck, setContextLocationCheck] = useState({
+    checked: false,
+    success: false,
+    message: '',
+  })
+  const VIETNAM_PROVINCES = [
+    'An Giang, Vietnam', 'Ba Ria - Vung Tau, Vietnam', 'Bac Giang, Vietnam', 'Bac Kan, Vietnam', 'Bac Lieu, Vietnam',
+    'Bac Ninh, Vietnam', 'Ben Tre, Vietnam', 'Binh Dinh, Vietnam', 'Binh Duong, Vietnam', 'Binh Phuoc, Vietnam',
+    'Binh Thuan, Vietnam', 'Ca Mau, Vietnam', 'Can Tho, Vietnam', 'Cao Bang, Vietnam', 'Da Nang, Vietnam',
+    'Dak Lak, Vietnam', 'Dak Nong, Vietnam', 'Dien Bien, Vietnam', 'Dong Nai, Vietnam', 'Dong Thap, Vietnam',
+    'Gia Lai, Vietnam', 'Ha Giang, Vietnam', 'Ha Nam, Vietnam', 'Ha Noi, Vietnam', 'Ha Tinh, Vietnam',
+    'Hai Duong, Vietnam', 'Hai Phong, Vietnam', 'Hau Giang, Vietnam', 'Hoa Binh, Vietnam', 'Hung Yen, Vietnam',
+    'Hue, Vietnam', 'Khanh Hoa, Vietnam', 'Kien Giang, Vietnam', 'Kon Tum, Vietnam', 'Lai Chau, Vietnam',
+    'Lam Dong, Vietnam', 'Lang Son, Vietnam', 'Lao Cai, Vietnam', 'Long An, Vietnam', 'Nam Dinh, Vietnam',
+    'Nghe An, Vietnam', 'Ninh Binh, Vietnam', 'Ninh Thuan, Vietnam', 'Phu Tho, Vietnam', 'Phu Yen, Vietnam',
+    'Quang Binh, Vietnam', 'Quang Nam, Vietnam', 'Quang Ngai, Vietnam', 'Quang Ninh, Vietnam', 'Quang Tri, Vietnam',
+    'Soc Trang, Vietnam', 'Son La, Vietnam', 'Tay Ninh, Vietnam', 'Thai Binh, Vietnam', 'Thai Nguyen, Vietnam',
+    'Thanh Hoa, Vietnam', 'Tien Giang, Vietnam', 'Ho Chi Minh City, Vietnam', 'Tra Vinh, Vietnam', 'Tuyen Quang, Vietnam',
+    'Vinh Long, Vietnam', 'Vinh Phuc, Vietnam', 'Yen Bai, Vietnam'
+  ]
   const [formData, setFormData] = useState({
     name: '',
     device_type: 'temperature',
@@ -289,12 +321,9 @@ export default function IoTDeviceManager() {
         const date = new Date(parseInt(minuteKey))
         
         return {
-          time: date.toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit'
-          }),
+          time: formatVNTime(date),
           value: parseFloat(avgValue.toFixed(2)),
-          timestamp: date.toISOString()
+          timestamp: date.getTime()
         }
       })
     
@@ -377,7 +406,7 @@ export default function IoTDeviceManager() {
         
         setChartData(formattedData)
         setChartLastUpdated(new Date())
-        console.log('Chart updated at:', new Date().toLocaleTimeString())
+        console.log('Chart updated at (VN):', formatVNTime(new Date(), true))
       } catch (err) {
         console.error('Failed to refresh chart data:', err)
       }
@@ -531,6 +560,122 @@ export default function IoTDeviceManager() {
   const openAlertThresholdsModal = (device) => {
     setSelectedDeviceForAlert(device)
     setShowAlertThresholdsModal(true)
+  }
+
+  const openSensorContextModal = (device) => {
+    const existingLocationQuery = device.location_query || ''
+    setSelectedDeviceForContext(device)
+    setSensorContextForm({
+      environment_type: device.environment_type || 'indoor',
+      location_query: existingLocationQuery,
+      task_description: device.task_description || '',
+      priority_level: device.priority_level || 'medium',
+      action_hint: device.action_hint || '',
+    })
+    setContextLocationCheck({
+      checked: false,
+      success: false,
+      message: '',
+    })
+    setShowSensorContextModal(true)
+  }
+
+  const closeSensorContextModal = () => {
+    setShowSensorContextModal(false)
+    setSelectedDeviceForContext(null)
+  }
+
+  const handleSensorContextChange = (e) => {
+    const { name, value } = e.target
+    setSensorContextForm((prev) => ({ ...prev, [name]: value }))
+    if (name === 'environment_type' || name === 'location_query') {
+      setContextLocationCheck({
+        checked: false,
+        success: false,
+        message: '',
+      })
+    }
+  }
+  const isStandardProvinceLocation = (value) => VIETNAM_PROVINCES.includes((value || '').trim())
+
+  const handleCheckContextLocation = async () => {
+    const query = sensorContextForm.location_query.trim()
+    if (!query) {
+      setContextLocationCheck({
+        checked: true,
+        success: false,
+        message: 'Vui lòng nhập khu vực ngoài trời trước khi kiểm tra.',
+      })
+      return
+    }
+    if (!isStandardProvinceLocation(query)) {
+      setContextLocationCheck({
+        checked: true,
+        success: false,
+        message: 'Vui lòng chọn đúng tỉnh/thành trong danh sách chuẩn hóa.',
+      })
+      return
+    }
+
+    try {
+      setCheckingContextLocation(true)
+      const response = await api.post('/api/iot-devices/geocode', { location_query: query })
+      const data = response?.data || {}
+      if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') {
+        setContextLocationCheck({
+          checked: true,
+          success: false,
+          message: 'Không nhận diện được tọa độ. Bạn thử địa danh chi tiết hơn nhé.',
+        })
+        return
+      }
+      setContextLocationCheck({
+        checked: true,
+        success: true,
+        message: `Đã nhận diện: ${data.name || query} (${data.latitude.toFixed(4)}, ${data.longitude.toFixed(4)})`,
+      })
+    } catch (err) {
+      setContextLocationCheck({
+        checked: true,
+        success: false,
+        message: err.response?.data?.detail || 'Không thể kiểm tra vị trí lúc này.',
+      })
+    } finally {
+      setCheckingContextLocation(false)
+    }
+  }
+
+  const saveSensorContext = async () => {
+    if (!selectedDeviceForContext) return
+    if (sensorContextForm.environment_type === 'outdoor' && !sensorContextForm.location_query.trim()) {
+      notify('Vui lòng nhập khu vực ngoài trời')
+      return
+    }
+    if (sensorContextForm.environment_type === 'outdoor' && !isStandardProvinceLocation(sensorContextForm.location_query)) {
+      notify('Vui lòng chọn tỉnh/thành chuẩn hóa trong danh sách')
+      return
+    }
+    if (sensorContextForm.environment_type === 'outdoor' && !contextLocationCheck.success) {
+      notify('Vui lòng bấm "Kiểm tra vị trí" và xác nhận thành công trước khi lưu')
+      return
+    }
+
+    try {
+      setSavingSensorContext(true)
+      await updateIoTDevice(selectedDeviceForContext.id, {
+        environment_type: sensorContextForm.environment_type,
+        location_query: sensorContextForm.environment_type === 'outdoor' ? sensorContextForm.location_query.trim() : null,
+        task_description: sensorContextForm.task_description.trim() || null,
+        priority_level: sensorContextForm.priority_level || null,
+        action_hint: sensorContextForm.action_hint.trim() || null,
+      })
+      notify('Đã cập nhật ngữ cảnh AI cho sensor')
+      closeSensorContextModal()
+    } catch (err) {
+      notify('Lưu thất bại: ' + (err.response?.data?.detail || err.message))
+    } finally {
+      setSavingSensorContext(false)
+    }
   }
 
   const handleSaveAlertThresholds = async (thresholdData) => {
@@ -921,6 +1066,17 @@ export default function IoTDeviceManager() {
                     </div>
                   )}
 
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <span className="text-xs px-2 py-1 rounded border border-cyan-500/40 bg-cyan-500/10 text-cyan-300">
+                      {device.environment_type === 'outdoor' ? 'Ngoài trời' : 'Trong nhà'}
+                    </span>
+                    {device.environment_type === 'outdoor' && device.location_query && (
+                      <span className="text-xs px-2 py-1 rounded border border-purple-500/40 bg-purple-500/10 text-purple-300">
+                        {device.location_query}
+                      </span>
+                    )}
+                  </div>
+
                   {/* Real-time Metric Display - Integrated with Thresholds */}
                   <div className={`rounded-lg p-4 mb-4 transition-all ${
                     alertStatus.triggered
@@ -1030,6 +1186,17 @@ export default function IoTDeviceManager() {
                       >
                         <Edit2 className="w-4 h-4" />
                         Edit
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          openSensorContextModal(device)
+                        }}
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-cyan-500/20 text-cyan-300 rounded hover:bg-cyan-500/30 transition-all text-sm"
+                        title="Cấu hình ngữ cảnh AI cho sensor"
+                      >
+                        <Settings className="w-4 h-4" />
+                        AI Context
                       </button>
                       <button
                         onClick={(e) => {
@@ -1155,7 +1322,7 @@ export default function IoTDeviceManager() {
                 )}
                 {chartLastUpdated && (
                   <p className="text-xs text-gray-600 mt-1">
-                    Updated: {chartLastUpdated.toLocaleTimeString()}
+                    Updated: {formatVNTime(chartLastUpdated, true)} (GMT+7)
                   </p>
                 )}
               </div>
@@ -1256,6 +1423,135 @@ export default function IoTDeviceManager() {
                 className="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSensorContextModal && selectedDeviceForContext && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div className="bg-dark-800 border border-neon-cyan/20 rounded-xl p-6 max-w-2xl w-full mx-4">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h3 className="text-2xl font-bold text-white">AI Context</h3>
+                <p className="text-sm text-gray-400 mt-1">{selectedDeviceForContext.name}</p>
+              </div>
+              <button onClick={closeSensorContextModal} className="text-gray-400 hover:text-white">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">Môi trường lắp đặt</label>
+                <select
+                  name="environment_type"
+                  value={sensorContextForm.environment_type}
+                  onChange={handleSensorContextChange}
+                  className="w-full bg-dark-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-neon-cyan outline-none"
+                >
+                  <option value="indoor">Trong nhà</option>
+                  <option value="outdoor">Ngoài trời</option>
+                </select>
+              </div>
+
+              {sensorContextForm.environment_type === 'outdoor' && (
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">Khu vực ngoài trời</label>
+                  <input
+                    type="text"
+                    list="vn-province-options"
+                    value={sensorContextForm.location_query}
+                    onChange={(e) => {
+                      setSensorContextForm((prev) => ({ ...prev, location_query: e.target.value }))
+                      setContextLocationCheck({
+                        checked: false,
+                        success: false,
+                        message: '',
+                      })
+                    }}
+                    placeholder="Chọn hoặc gõ để tìm tỉnh/thành chuẩn hóa..."
+                    className="w-full bg-dark-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-neon-cyan outline-none mb-2"
+                  />
+                  <datalist id="vn-province-options">
+                    {VIETNAM_PROVINCES.map((loc) => (
+                      <option key={loc} value={loc} />
+                    ))}
+                  </datalist>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={handleCheckContextLocation}
+                      disabled={checkingContextLocation || !sensorContextForm.location_query}
+                      className="px-3 py-2 bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 rounded-lg hover:border-neon-cyan transition-all disabled:opacity-50"
+                    >
+                      {checkingContextLocation ? 'Đang kiểm tra...' : 'Kiểm tra vị trí'}
+                    </button>
+                  </div>
+                  {contextLocationCheck.checked && (
+                    <p className={`text-xs mt-2 ${contextLocationCheck.success ? 'text-green-400' : 'text-red-400'}`}>
+                      {contextLocationCheck.message}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">Mô tả nhiệm vụ sensor (tuỳ chọn)</label>
+                <input
+                  type="text"
+                  name="task_description"
+                  value={sensorContextForm.task_description}
+                  onChange={handleSensorContextChange}
+                  placeholder="Ví dụ: theo dõi nhiệt độ phòng khách"
+                  className="w-full bg-dark-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-neon-cyan outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">Mức ưu tiên</label>
+                <select
+                  name="priority_level"
+                  value={sensorContextForm.priority_level}
+                  onChange={handleSensorContextChange}
+                  className="w-full bg-dark-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-neon-cyan outline-none"
+                >
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">Gợi ý hành động ban đầu (tuỳ chọn)</label>
+                <input
+                  type="text"
+                  name="action_hint"
+                  value={sensorContextForm.action_hint}
+                  onChange={handleSensorContextChange}
+                  placeholder="Ví dụ: kiểm tra quạt và thông gió"
+                  className="w-full bg-dark-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-neon-cyan outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-3 mt-6">
+              <button
+                type="button"
+                onClick={closeSensorContextModal}
+                className="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={saveSensorContext}
+                disabled={savingSensorContext}
+                className="flex-1 px-4 py-2 bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 rounded-lg hover:border-neon-cyan transition-all disabled:opacity-50"
+              >
+                {savingSensorContext ? 'Đang lưu...' : 'Lưu AI Context'}
               </button>
             </div>
           </div>

@@ -17,9 +17,7 @@ def _resolve_metric_location(db: Session, sensor_id: str, location: Optional[str
 
 def create_metric(db: Session, metric: MetricCreate) -> Metric:
     """Create a single metric record"""
-    # Use provided timestamp or current time (Vietnam timezone UTC+7)
-    vietnam_tz = timezone(timedelta(hours=7))
-    event_ts = metric.event_ts if metric.event_ts else datetime.now(vietnam_tz)
+    event_ts = metric.event_ts if metric.event_ts else datetime.now()
     resolved_location = _resolve_metric_location(db, metric.sensor_id, metric.location)
     
     db_metric = Metric(
@@ -28,7 +26,7 @@ def create_metric(db: Session, metric: MetricCreate) -> Metric:
         location=resolved_location,
         metric_type=metric.metric_type,
         metric_value=metric.metric_value,
-        unit=metric.unit
+        unit=metric.unit,
     )
     db.add(db_metric)
     db.commit()
@@ -40,8 +38,7 @@ def create_metrics_bulk(db: Session, metrics: List[MetricCreate]) -> List[Metric
     """Create multiple metric records"""
     db_metrics = []
     for metric in metrics:
-        vietnam_tz = timezone(timedelta(hours=7))
-        event_ts = metric.event_ts if metric.event_ts else datetime.now(vietnam_tz)
+        event_ts = metric.event_ts if metric.event_ts else datetime.now()
         resolved_location = _resolve_metric_location(db, metric.sensor_id, metric.location)
         db_metric = Metric(
             event_ts=event_ts,
@@ -49,7 +46,7 @@ def create_metrics_bulk(db: Session, metrics: List[MetricCreate]) -> List[Metric
             location=resolved_location,
             metric_type=metric.metric_type,
             metric_value=metric.metric_value,
-            unit=metric.unit
+            unit=metric.unit,
         )
         db_metrics.append(db_metric)
     
@@ -181,7 +178,8 @@ def create_alert(db: Session, alert: AlertCreate) -> Alert:
         current_value=alert.current_value,
         threshold=alert.threshold,
         message=alert.message,
-        source=alert.source
+        source=alert.source,
+        created_at=alert.created_at if alert.created_at else datetime.now(),
     )
     db.add(db_alert)
     db.commit()
@@ -191,8 +189,7 @@ def create_alert(db: Session, alert: AlertCreate) -> Alert:
 
 def get_recent_alerts(db: Session, hours: int = 24, limit: int = 100) -> List[Alert]:
     """Get recent alerts from last N hours"""
-    vietnam_tz = timezone(timedelta(hours=7))
-    time_threshold = datetime.now(vietnam_tz) - timedelta(hours=hours)
+    time_threshold = datetime.now() - timedelta(hours=hours)
     
     alerts = db.query(Alert).filter(
         Alert.created_at >= time_threshold
@@ -212,8 +209,7 @@ def get_unresolved_alerts(db: Session) -> List[Alert]:
 
 def get_alerts_by_metric(db: Session, metric_type: str, hours: int = 24) -> List[Alert]:
     """Get alerts for a specific metric type"""
-    vietnam_tz = timezone(timedelta(hours=7))
-    time_threshold = datetime.now(vietnam_tz) - timedelta(hours=hours)
+    time_threshold = datetime.now() - timedelta(hours=hours)
     
     alerts = db.query(Alert).filter(
         Alert.metric_type == metric_type,
@@ -225,11 +221,10 @@ def get_alerts_by_metric(db: Session, metric_type: str, hours: int = 24) -> List
 
 def resolve_alert(db: Session, alert_id: int) -> Optional[Alert]:
     """Mark an alert as resolved"""
-    vietnam_tz = timezone(timedelta(hours=7))
     alert = db.query(Alert).filter(Alert.id == alert_id).first()
     
     if alert:
-        alert.resolved_at = datetime.now(vietnam_tz)
+        alert.resolved_at = datetime.now()
         db.commit()
         db.refresh(alert)
     
@@ -238,9 +233,7 @@ def resolve_alert(db: Session, alert_id: int) -> Optional[Alert]:
 
 def delete_old_alerts(db: Session, days: int = 15) -> int:
     """Delete all alerts older than specified days (default: 15 days)"""
-    # Use Vietnam timezone for consistency
-    vietnam_tz = timezone(timedelta(hours=7))
-    time_threshold = datetime.now(vietnam_tz) - timedelta(days=days)
+    time_threshold = datetime.now() - timedelta(days=days)
     
     # Delete ALL alerts (both resolved and unresolved) older than threshold
     deleted_count = db.query(Alert).filter(

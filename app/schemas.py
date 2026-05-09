@@ -111,6 +111,7 @@ class AlertCreate(BaseModel):
     threshold: float = Field(..., description="Threshold that was exceeded")
     message: str = Field(..., description="Alert message")
     source: str = Field(default="system", description="Source of the metric")
+    created_at: Optional[datetime] = Field(default=None, description="Alert timestamp")
 
     @validator('metric_type')
     def validate_metric_type(cls, v):

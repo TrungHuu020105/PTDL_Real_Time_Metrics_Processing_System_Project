@@ -4,6 +4,7 @@ import { AlertCircle, Lock } from 'lucide-react'
 import api from '../api'
 import { checkMetricAlert } from '../utils/alertUtils'
 import { saveAlert } from '../utils/alertService'
+import { formatVNTime } from '../utils/vnTime'
 
 export default function IoTMetrics() {
   const [metricType, setMetricType] = useState('temperature')
@@ -87,10 +88,7 @@ export default function IoTMetrics() {
 
       const grouped = {}
       metrics.forEach(metric => {
-        const time = new Date(getMetricTimestamp(metric)).toLocaleTimeString('vi-VN', {
-          hour: '2-digit',
-          minute: '2-digit'
-        })
+        const time = formatVNTime(getMetricTimestamp(metric))
         if (!grouped[time]) {
           grouped[time] = []
         }

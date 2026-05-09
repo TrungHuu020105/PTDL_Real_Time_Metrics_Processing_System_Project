@@ -4,6 +4,7 @@ import { AlertCircle, Lock } from 'lucide-react'
 import api from '../api'
 import { checkMetricAlert } from '../utils/alertUtils'
 import { saveAlert } from '../utils/alertService'
+import { formatVNTime } from '../utils/vnTime'
 
 export default function MemoryMetrics() {
   const [data, setData] = useState([])
@@ -48,10 +49,7 @@ export default function MemoryMetrics() {
 
       const grouped = {}
       metrics.forEach(metric => {
-        const time = new Date(metric.timestamp).toLocaleTimeString('vi-VN', {
-          hour: '2-digit',
-          minute: '2-digit'
-        })
+        const time = formatVNTime(metric.timestamp)
         if (!grouped[time]) {
           grouped[time] = []
         }

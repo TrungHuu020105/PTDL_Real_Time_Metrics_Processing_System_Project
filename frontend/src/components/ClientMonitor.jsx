@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import api from '../api'
 import SimpleGauge from './SimpleGauge'
+import { formatVNDateTime, formatVNTime } from '../utils/vnTime'
 
 export default function ClientMonitor() {
   const [clients, setClients] = useState([])
@@ -119,13 +120,13 @@ export default function ClientMonitor() {
               <div>
                 <span className="text-gray-400">Kết nối lúc:</span>
                 <p className="text-lg font-semibold mt-1">
-                  {new Date(clientData.connected_at).toLocaleString('vi-VN')}
+                  {formatVNDateTime(clientData.connected_at)}
                 </p>
               </div>
               <div>
                 <span className="text-gray-400">Cập nhật lần cuối:</span>
                 <p className="text-lg font-semibold mt-1">
-                  {new Date(clientData.last_update).toLocaleString('vi-VN')}
+                  {formatVNDateTime(clientData.last_update)}
                 </p>
               </div>
             </div>
@@ -170,7 +171,7 @@ export default function ClientMonitor() {
               {/* Timestamp */}
               <div className="mt-6 text-center text-gray-400">
                 <p className="text-sm">
-                  Cập nhật: {new Date(clientData.metrics.timestamp).toLocaleString('vi-VN')}
+                  Cập nhật: {formatVNDateTime(clientData.metrics.timestamp)}
                 </p>
               </div>
             </div>
@@ -231,7 +232,7 @@ export default function ClientMonitor() {
                       {client.metrics ? `${client.metrics.ram.toFixed(1)}%` : 'N/A'}
                     </td>
                     <td className="px-4 py-3 text-right text-gray-400 text-xs">
-                      {new Date(client.last_update).toLocaleTimeString('vi-VN')}
+                      {formatVNTime(client.last_update)}
                     </td>
                   </tr>
                 ))}

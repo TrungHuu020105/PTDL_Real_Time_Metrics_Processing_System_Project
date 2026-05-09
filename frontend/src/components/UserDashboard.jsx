@@ -4,6 +4,7 @@ import { useDevices } from '../context/DeviceContext'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import AddDeviceModal from './AddDeviceModal'
 import api from '../api'
+import { formatVNDate, getVNDateInputValue } from '../utils/vnTime'
 
 export default function UserDashboard() {
   const { iotDevices: devices, myServers: servers, createIoTDevice } = useDevices()
@@ -14,9 +15,9 @@ export default function UserDashboard() {
   const [selectedDeviceId, setSelectedDeviceId] = useState(null)
   const [fromDate, setFromDate] = useState(() => {
     // Default to today (1-day view = hourly data)
-    return new Date().toISOString().split('T')[0]
+    return getVNDateInputValue()
   })
-  const [toDate, setToDate] = useState(new Date().toISOString().split('T')[0])
+  const [toDate, setToDate] = useState(getVNDateInputValue())
   const [chartData, setChartData] = useState([])
   const [loading, setLoading] = useState(false)
   const getMetricValue = (m) => m?.metric_value ?? m?.value
@@ -64,7 +65,11 @@ export default function UserDashboard() {
           const hourlyData = {}
           metrics.forEach(m => {
             const d = new Date(getMetricTimestamp(m))
-            const hour = d.getHours().toString().padStart(2, '0')
+            const hour = d.toLocaleTimeString('vi-VN', {
+              timeZone: 'Asia/Ho_Chi_Minh',
+              hour12: false,
+              hour: '2-digit'
+            })
             const key = `${hour}:00`
             if (!hourlyData[key]) {
               hourlyData[key] = { values: [], hour: key }
@@ -85,8 +90,7 @@ export default function UserDashboard() {
           console.log(`[UserDashboard] Aggregating into daily buckets`)
           const dailyData = {}
           metrics.forEach(m => {
-            const d = new Date(getMetricTimestamp(m))
-            const key = d.toISOString().split('T')[0]
+            const key = formatVNDate(getMetricTimestamp(m))
             if (!dailyData[key]) {
               dailyData[key] = { values: [], date: key }
             }

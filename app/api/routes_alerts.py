@@ -1,16 +1,19 @@
 """API routes for alerts endpoints"""
 
 from typing import List, Optional
-from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
+from app.models import Alert, IoTDevice, User
 from app.schemas import (
     AlertCreate,
     AlertResponse,
     AlertListResponse
 )
 from app import crud
+from app.api.routes_auth import get_current_user
+from app.services.ai_explanation_service import explain_alert_with_gemini
+from app.services.weather_service import get_weather_for_timestamp
 
 router = APIRouter(prefix="/api", tags=["alerts"])
 
@@ -129,4 +132,89 @@ async def cleanup_old_alerts(
     return {
         "status": "success",
         "message": f"Deleted {deleted_count} resolved alerts older than {days} days"
+    }
+
+
+@router.get("/alerts/{alert_id}/explain-ai")
+async def explain_alert_with_ai(
+    alert_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Generate AI explanation for a specific alert using Gemini + optional Open-Meteo context."""
+    alert = db.query(Alert).filter(Alert.id == alert_id).first()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    accessible_sources = crud.get_user_accessible_sources(db, current_user.id)
+    if current_user.role != "admin" and alert.source not in accessible_sources:
+        raise HTTPException(status_code=403, detail="You do not have access to this alert")
+
+    device = db.query(IoTDevice).filter(IoTDevice.source == alert.source).first()
+    environment_type = (device.environment_type if device and device.environment_type else "indoor").lower()
+    is_outdoor = environment_type == "outdoor"
+
+    weather_context = None
+    weather_fetch_error = None
+    if (
+        is_outdoor
+        and device
+        and device.latitude is not None
+        and device.longitude is not None
+    ):
+        try:
+            weather_context = get_weather_for_timestamp(
+                latitude=float(device.latitude),
+                longitude=float(device.longitude),
+                target_iso_time=alert.created_at.isoformat() if alert.created_at else "",
+                timezone=device.timezone_name or "auto",
+            )
+        except Exception as exc:
+            # Never let weather enrichment break AI explanation flow.
+            weather_context = None
+            weather_fetch_error = str(exc)
+
+    alert_context = {
+        "alert_id": alert.id,
+        "metric_type": alert.metric_type,
+        "status": alert.status,
+        "current_value": alert.current_value,
+        "threshold": alert.threshold,
+        "source": alert.source,
+        "message": alert.message,
+        # Time fields are intentionally omitted for indoor sensors.
+        "device": {
+            "name": device.name if device else None,
+            "location": device.location if device else None,
+            "environment_type": environment_type,
+            "location_query": device.location_query if device else None,
+            "task_description": device.task_description if device else None,
+            "priority_level": device.priority_level if device else None,
+            "action_hint": device.action_hint if device else None,
+        },
+        "weather": weather_context,
+    }
+
+    if is_outdoor and alert.created_at:
+        alert_context["alert_time"] = {
+            "iso": alert.created_at.isoformat(),
+            "display": alert.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "note": "Use this exact alert time for reasoning with weather context.",
+        }
+
+    ai_result = explain_alert_with_gemini(alert_context)
+    return {
+        "alert_id": alert.id,
+        "success": ai_result["success"],
+        "message": ai_result["message"],
+        "explanation": ai_result["explanation"],
+        "error_code": ai_result.get("error_code"),
+        "error_detail": ai_result.get("error_detail"),
+        "retry_after_seconds": ai_result.get("retry_after_seconds"),
+        "context": {
+            "has_weather": weather_context is not None,
+            "environment_type": environment_type,
+            "alert_time_included": bool(is_outdoor and alert.created_at),
+            "weather_fetch_error": weather_fetch_error,
+        },
     }

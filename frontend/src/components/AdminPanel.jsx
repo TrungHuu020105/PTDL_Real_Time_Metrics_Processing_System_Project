@@ -2,6 +2,7 @@
 import { CheckCircle, XCircle, Trash2, AlertCircle, DollarSign, Power, PowerOff } from 'lucide-react'
 import api from '../api'
 import { useAuth } from '../context/AuthContext'
+import { formatVNDate } from '../utils/vnTime'
 
 export default function AdminPanel() {
   const { user } = useAuth()
@@ -178,7 +179,7 @@ export default function AdminPanel() {
                 <div>
                   <p className="text-white font-semibold">{user.username}</p>
                   <p className="text-sm text-gray-400">{user.email}</p>
-                  <p className="text-xs text-gray-500 mt-1">Applied: {new Date(user.created_at).toLocaleDateString()}</p>
+                  <p className="text-xs text-gray-500 mt-1">Applied: {formatVNDate(user.created_at)}</p>
                 </div>
                 <div className="flex gap-2">
                   <button

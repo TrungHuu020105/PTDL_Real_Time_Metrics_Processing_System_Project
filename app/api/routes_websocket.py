@@ -23,10 +23,23 @@ ALERT_NOTIFY_COOLDOWN_SECONDS = 5
 _last_alert_notification_ts = {}
 
 
+def _parse_metric_timestamp(timestamp: str | None) -> datetime:
+    if not timestamp:
+        return datetime.now()
+    try:
+        parsed = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        if parsed.tzinfo is not None:
+            return parsed.astimezone().replace(tzinfo=None)
+        return parsed
+    except Exception:
+        return datetime.now()
+
+
 def save_iot_metric_to_db(
     metric_type: str,
     source: str,
     location: str | None,
+    timestamp: str | None,
     value: float,
     unit: str,
     save_flag: bool,
@@ -47,18 +60,19 @@ def save_iot_metric_to_db(
     try:
         db = SessionLocal()
         # Always evaluate alert state, even for realtime-only records.
-        _check_and_trigger_alert(db, metric_type, source, value)
+        metric_ts = _parse_metric_timestamp(timestamp)
+        _check_and_trigger_alert(db, metric_type, source, value, metric_ts)
 
         if not save_flag:
             return  # Skip DB save for non-important data
 
         metric = MetricCreate(
-            event_ts=None,
+            event_ts=timestamp,
             sensor_id=source,
             location=location,
             metric_type=metric_type,
             metric_value=value,
-            unit=unit
+            unit=unit,
         )
         create_metrics_bulk(db, [metric])
         print(f"💾 Saved {metric_type}={value} (source={source}) to DB")
@@ -69,7 +83,7 @@ def save_iot_metric_to_db(
             db.close()
 
 
-def _check_and_trigger_alert(db, metric_type: str, source: str, value: float):
+def _check_and_trigger_alert(db, metric_type: str, source: str, value: float, metric_ts: datetime):
     """Check threshold for IoT device and trigger alert record + notifications."""
     try:
         device = db.query(IoTDevice).filter(IoTDevice.source == source).first()
@@ -126,6 +140,7 @@ def _check_and_trigger_alert(db, metric_type: str, source: str, value: float):
                 threshold=float(threshold),
                 message=f"{metric_type} threshold exceeded on {device.name}",
                 source=source,
+                created_at=metric_ts,
             ),
         )
     except Exception as exc:
@@ -186,6 +201,7 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
                             metrics.metric_type,
                             metrics.source,
                             metrics.location,
+                            metrics.timestamp,
                             metrics.value,
                             metrics.unit,
                             metrics.saved

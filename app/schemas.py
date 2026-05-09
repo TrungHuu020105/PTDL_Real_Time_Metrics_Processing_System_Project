@@ -270,6 +270,8 @@ class ChatConversationResponse(BaseModel):
     last_message_preview: Optional[str] = None
     unread_for_user: int = 0
     unread_for_admin: int = 0
+    user_name: Optional[str] = None
+    user_email: Optional[str] = None
 
     class Config:
         from_attributes = True

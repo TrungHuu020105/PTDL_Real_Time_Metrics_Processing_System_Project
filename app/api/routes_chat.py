@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 
 def _conversation_to_response(db: Session, conversation):
     messages = crud.list_chat_messages(db, conversation.id)
+    owner = crud.get_user_by_id(db, conversation.user_id)
     last_preview = messages[-1].content[:120] if messages else ""
     unread_for_user = len([m for m in messages if m.sender_type in {"admin", "system"}])
     unread_for_admin = len([m for m in messages if m.sender_type == "user"])
@@ -39,6 +40,8 @@ def _conversation_to_response(db: Session, conversation):
         "last_message_preview": last_preview,
         "unread_for_user": unread_for_user,
         "unread_for_admin": unread_for_admin,
+        "user_name": owner.username if owner else None,
+        "user_email": owner.email if owner else None,
     }
 
 
@@ -179,6 +182,44 @@ async def get_conversation_messages(
         "messages": messages,
         "count": len(messages),
     }
+
+
+@router.post("/conversations/new")
+async def create_new_conversation(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if current_user.role == "admin":
+        raise HTTPException(status_code=400, detail="Admins cannot create user support conversations")
+    conversation = crud.create_chat_conversation(
+        db=db,
+        user_id=current_user.id,
+        status="bot_active",
+        subject="User support",
+    )
+    crud.create_chat_message(
+        db=db,
+        conversation_id=conversation.id,
+        sender_type="system",
+        content="Da tao cuoc hoi thoai moi. Ban co the nhan van de de bat dau.",
+    )
+    return {"success": True, "conversation_id": conversation.id}
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    conversation = crud.get_chat_conversation(db, conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    _validate_conversation_access(conversation, current_user)
+    if current_user.role == "admin":
+        raise HTTPException(status_code=403, detail="Admin cannot delete user conversations")
+    crud.delete_chat_conversation(db, conversation)
+    return {"success": True}
 
 
 @router.post("/send")

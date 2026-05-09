@@ -862,6 +862,12 @@ def list_chat_messages(db: Session, conversation_id: int) -> List[ChatMessage]:
     )
 
 
+def delete_chat_conversation(db: Session, conversation: ChatConversation) -> None:
+    db.query(ChatMessage).filter(ChatMessage.conversation_id == conversation.id).delete()
+    db.delete(conversation)
+    db.commit()
+
+
 def list_chat_issue_templates(db: Session, active_only: bool = True) -> List[ChatIssueTemplate]:
     query = db.query(ChatIssueTemplate)
     if active_only:

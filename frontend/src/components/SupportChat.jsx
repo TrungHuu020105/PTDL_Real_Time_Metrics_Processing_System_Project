@@ -38,11 +38,6 @@ export default function SupportChat() {
     [conversations, selectedConversationId]
   )
 
-  const hasUserSentMessage = useMemo(
-    () => messages.some((m) => m.sender_type === 'user'),
-    [messages]
-  )
-
   const otherIssueTemplate = useMemo(
     () => issueTemplates.find((i) => (i.title || '').toLowerCase() === 'other'),
     [issueTemplates]
@@ -187,6 +182,40 @@ export default function SupportChat() {
     }
   }
 
+  const createNewConversation = async () => {
+    if (isAdmin) return
+    try {
+      setLoading(true)
+      const res = await api.post('/api/chat/conversations/new')
+      const cid = res.data?.conversation_id
+      await loadConversations()
+      if (cid) {
+        setSelectedConversationId(cid)
+        await loadMessages(cid)
+      }
+    } catch (err) {
+      console.error('Failed to create conversation:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const deleteCurrentConversation = async () => {
+    if (isAdmin || !selectedConversationId) return
+    if (!confirm('Delete this conversation?')) return
+    try {
+      setLoading(true)
+      await api.delete(`/api/chat/conversations/${selectedConversationId}`)
+      setSelectedConversationId(null)
+      setMessages([])
+      await loadConversations()
+    } catch (err) {
+      console.error('Failed to delete conversation:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const saveIssueTemplate = async () => {
     if (!issueForm.title.trim()) return
     try {
@@ -284,6 +313,24 @@ export default function SupportChat() {
             </select>
           </div>
         )}
+        {!isAdmin && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={createNewConversation}
+              disabled={loading}
+              className="px-3 py-2 rounded-lg bg-neon-cyan/15 text-neon-cyan border border-neon-cyan/40 hover:bg-neon-cyan/25 transition-all text-sm disabled:opacity-50"
+            >
+              New chat
+            </button>
+            <button
+              onClick={deleteCurrentConversation}
+              disabled={loading || !selectedConversationId}
+              className="px-3 py-2 rounded-lg bg-red-500/15 text-red-300 border border-red-400/40 hover:bg-red-500/25 transition-all text-sm disabled:opacity-50"
+            >
+              Delete chat
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 flex-1 min-h-0">
@@ -303,9 +350,12 @@ export default function SupportChat() {
                     : 'border-gray-700 bg-dark-900 hover:border-neon-cyan/40'
                 }`}
               >
-                <p className="text-white text-sm font-semibold">#{conv.id} - {STATUS_LABELS[conv.status] || conv.status}</p>
+                <p className="text-white text-sm font-semibold">{STATUS_LABELS[conv.status] || conv.status}</p>
+                {isAdmin && conv.user_name && (
+                  <p className="text-neon-cyan text-xs mt-1">User: {conv.user_name} {conv.user_email ? `(${conv.user_email})` : ''}</p>
+                )}
                 <p className="text-gray-400 text-xs mt-1 line-clamp-2">{conv.last_message_preview || 'No message yet'}</p>
-                <p className="text-gray-500 text-[11px] mt-1">{formatVNDateTime(conv.updated_at)} (GMT+7)</p>
+                <p className="text-gray-500 text-[11px] mt-1">{formatVNDateTime(conv.updated_at, true, { naiveAsUTC: true })} (GMT+7)</p>
               </button>
             ))}
             {conversations.length === 0 && <p className="text-gray-500 text-sm">No conversation yet.</p>}
@@ -315,8 +365,13 @@ export default function SupportChat() {
         <div className="lg:col-span-2 card-border bg-dark-800 p-4 flex flex-col min-h-0">
           <div className="flex items-center justify-between pb-3 border-b border-gray-700">
             <div>
-              <p className="text-white font-semibold">{selectedConversation ? `Conversation #${selectedConversation.id}` : 'Select a conversation'}</p>
+              <p className="text-white font-semibold">{selectedConversation ? 'Conversation' : 'Select a conversation'}</p>
               {selectedConversation && <p className="text-xs text-gray-400 mt-1">{STATUS_LABELS[selectedConversation.status] || selectedConversation.status}</p>}
+              {isAdmin && selectedConversation?.user_name && (
+                <p className="text-xs text-neon-cyan mt-1">
+                  Chat with: {selectedConversation.user_name}{selectedConversation.user_email ? ` (${selectedConversation.user_email})` : ''}
+                </p>
+              )}
             </div>
             {!isAdmin && selectedConversation && (
               <button
@@ -360,7 +415,7 @@ export default function SupportChat() {
                     <div className="flex items-center gap-2 text-xs opacity-80 mb-1">
                       {icon}
                       <span className="capitalize">{msg.sender_type}</span>
-                      <span>{formatVNDateTime(msg.created_at)} (GMT+7)</span>
+                      <span>{formatVNDateTime(msg.created_at, true, { naiveAsUTC: true })} (GMT+7)</span>
                     </div>
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   </div>
@@ -392,7 +447,7 @@ export default function SupportChat() {
             </button>
           </div>
 
-          {!isAdmin && selectedConversation && hasUserSentMessage && (
+          {!isAdmin && selectedConversation && (
             <div className="mt-3 border-t border-gray-700 pt-3">
               <p className="text-xs text-gray-400 mb-2">Common issues</p>
               <div className="flex gap-2 overflow-x-auto pb-1">

@@ -121,12 +121,19 @@ export default function IoTDeviceManager() {
   const [savingAlerts, setSavingAlerts] = useState(false)
   const [showNotificationSettings, setShowNotificationSettings] = useState(false)
   const [showTelegramGuide, setShowTelegramGuide] = useState(false)
+  const [openSettingsMenuId, setOpenSettingsMenuId] = useState(null)
   const [notificationTargets, setNotificationTargets] = useState([])
   const [newTelegramChatId, setNewTelegramChatId] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [settingsLoading, setSettingsLoading] = useState(false)
   const getMetricValue = (m) => m?.metric_value ?? m?.value
   const getMetricTimestamp = (m) => m?.event_ts ?? m?.timestamp
+
+  useEffect(() => {
+    const closeSettingsMenu = () => setOpenSettingsMenuId(null)
+    document.addEventListener('click', closeSettingsMenu)
+    return () => document.removeEventListener('click', closeSettingsMenu)
+  }, [])
 
   useEffect(() => {
     if (isAdmin) return
@@ -1166,44 +1173,67 @@ export default function IoTDeviceManager() {
                   <div className="flex flex-col gap-2">
                     {/* User buttons */}
                     <div className="flex gap-2">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          openAlertThresholdsModal(device)
-                        }}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-amber-500/20 text-amber-400 rounded hover:bg-amber-500/30 transition-all text-sm"
-                        title="Configure alert thresholds"
-                      >
-                        <AlertCircle className="w-4 h-4" />
-                        Alerts
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          startEdit(device)
-                        }}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-blue-500/20 text-blue-400 rounded hover:bg-blue-500/30 transition-all text-sm"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                        Edit
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          openSensorContextModal(device)
-                        }}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-cyan-500/20 text-cyan-300 rounded hover:bg-cyan-500/30 transition-all text-sm"
-                        title="Cấu hình ngữ cảnh AI cho sensor"
-                      >
-                        <Settings className="w-4 h-4" />
-                        AI Context
-                      </button>
+                      <div className="relative flex-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setOpenSettingsMenuId((prev) => (prev === device.id ? null : device.id))
+                          }}
+                          className="w-full flex items-center justify-center gap-2 px-3 py-2 bg-cyan-500/20 text-cyan-300 rounded hover:bg-cyan-500/30 transition-all text-sm border border-cyan-400/30"
+                          title="Open sensor settings"
+                        >
+                          <Settings className="w-4 h-4" />
+                          Setting
+                        </button>
+
+                        {openSettingsMenuId === device.id && (
+                          <div
+                            className="absolute left-0 right-0 mt-2 bg-dark-900/95 border border-cyan-400/30 rounded-lg shadow-xl backdrop-blur-sm z-20 p-1"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <button
+                              onClick={() => {
+                                openAlertThresholdsModal(device)
+                                setOpenSettingsMenuId(null)
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-left text-amber-300 hover:bg-amber-500/20 rounded-md transition-all text-sm"
+                              title="Configure alert thresholds"
+                            >
+                              <AlertCircle className="w-4 h-4" />
+                              Alerts
+                            </button>
+                            <button
+                              onClick={() => {
+                                startEdit(device)
+                                setOpenSettingsMenuId(null)
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-left text-blue-300 hover:bg-blue-500/20 rounded-md transition-all text-sm"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => {
+                                openSensorContextModal(device)
+                                setOpenSettingsMenuId(null)
+                              }}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-left text-cyan-300 hover:bg-cyan-500/20 rounded-md transition-all text-sm"
+                              title="Cấu hình ngữ cảnh AI cho sensor"
+                            >
+                              <Settings className="w-4 h-4" />
+                              AI Context
+                            </button>
+                          </div>
+                        )}
+                      </div>
+
                       <button
                         onClick={(e) => {
                           e.stopPropagation()
                           handleDelete(device.id)
+                          setOpenSettingsMenuId(null)
                         }}
-                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all text-sm"
+                        className="flex-1 flex items-center justify-center gap-2 px-3 py-2 bg-red-500/20 text-red-400 rounded hover:bg-red-500/30 transition-all text-sm border border-red-400/30"
                       >
                         <Trash2 className="w-4 h-4" />
                         Delete

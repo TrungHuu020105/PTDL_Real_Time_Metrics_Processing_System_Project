@@ -1,5 +1,5 @@
 ﻿import { useState, useEffect } from 'react'
-import { AlertTriangle, AlertCircle, CheckCircle, Sparkles, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Sparkles, X } from 'lucide-react'
 import api from '../api'
 
 export default function Alerts() {
@@ -7,6 +7,11 @@ export default function Alerts() {
   const [lastUpdated, setLastUpdated] = useState(null)
   const [explainingAlertId, setExplainingAlertId] = useState(null)
   const [aiExplainModal, setAiExplainModal] = useState({ open: false, title: '', content: '', meta: null })
+  const [filters, setFilters] = useState({
+    search: '',
+    metric: 'all',
+    source: 'all',
+  })
 
   const formatMetricName = (metric) => {
     const names = {
@@ -63,38 +68,9 @@ export default function Alerts() {
     return () => clearInterval(interval)
   }, [])
 
-  const getAlertIcon = (status) => {
-    switch (status) {
-      case 'critical':
-        return <AlertTriangle className="w-6 h-6 flex-shrink-0" />
-      case 'warning':
-        return <AlertCircle className="w-6 h-6 flex-shrink-0" />
-      default:
-        return <CheckCircle className="w-6 h-6 flex-shrink-0" />
-    }
-  }
-
-  const getAlertColor = (status) => {
-    switch (status) {
-      case 'critical':
-        return 'text-neon-red'
-      case 'warning':
-        return 'text-neon-yellow'
-      default:
-        return 'text-neon-green'
-    }
-  }
-
-  const getStatusColor = (status) => {
-    switch (status) {
-      case 'critical':
-        return '#ff3333'
-      case 'warning':
-        return '#ffcc00'
-      default:
-        return '#00ff88'
-    }
-  }
+  const getAlertIcon = () => <AlertTriangle className="w-6 h-6 flex-shrink-0" />
+  const getAlertColor = () => 'text-neon-red'
+  const getStatusColor = () => '#ff3333'
 
   const explainWithAI = async (alert) => {
     try {
@@ -138,12 +114,30 @@ export default function Alerts() {
     }
   }
 
+  const metricOptions = Array.from(new Set(alerts.map((a) => a.metric_type).filter(Boolean)))
+  const sourceOptions = Array.from(new Set(alerts.map((a) => a.source).filter(Boolean)))
+
+  const filteredAlerts = alerts.filter((alert) => {
+    const metricOk = filters.metric === 'all' || alert.metric_type === filters.metric
+    const sourceOk = filters.source === 'all' || alert.source === filters.source
+    const searchText = filters.search.trim().toLowerCase()
+    const searchOk = !searchText || [
+      alert.metric_type,
+      alert.source,
+      alert.location,
+      alert.message,
+      alert.status,
+    ].some((field) => String(field || '').toLowerCase().includes(searchText))
+
+    return metricOk && sourceOk && searchOk
+  })
+
   return (
     <div className="p-6 space-y-6">
       <div>
         <h1 className="text-3xl font-bold text-white">Alerts & Anomalies</h1>
         <p className="text-gray-400 mt-2">
-          System notifications and warnings
+          System alerts
           {lastUpdated && (
             <span className="ml-4 text-xs text-gray-500">
               Last updated: {formatVNTime(lastUpdated)}
@@ -152,45 +146,82 @@ export default function Alerts() {
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <div className="card-border p-4 bg-dark-800">
-          <p className="text-gray-400 text-sm">Critical Alerts</p>
-          <p className="text-2xl font-bold text-neon-red">{alerts.filter((a) => a.status === 'critical').length}</p>
+          <p className="text-gray-400 text-sm">Showing</p>
+          <p className="text-2xl font-bold text-neon-cyan">{filteredAlerts.length}/{alerts.length}</p>
         </div>
         <div className="card-border p-4 bg-dark-800">
-          <p className="text-gray-400 text-sm">Warning Alerts</p>
-          <p className="text-2xl font-bold text-neon-yellow">{alerts.filter((a) => a.status === 'warning').length}</p>
-        </div>
-        <div className="card-border p-4 bg-dark-800">
-          <p className="text-gray-400 text-sm">Total Alerts (24h)</p>
-          <p className="text-2xl font-bold text-neon-cyan">{alerts.length}</p>
+          <p className="text-gray-400 text-sm">Alert Type</p>
+          <p className="text-2xl font-bold text-neon-red">ALERT</p>
         </div>
       </div>
 
-      {alerts.length === 0 ? (
+      <div className="card-border p-4 bg-dark-800">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <input
+            type="text"
+            value={filters.search}
+            onChange={(e) => setFilters((prev) => ({ ...prev, search: e.target.value }))}
+            className="bg-dark-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-neon-cyan outline-none"
+            placeholder="Search alert message/source/location..."
+          />
+          <select
+            value={filters.metric}
+            onChange={(e) => setFilters((prev) => ({ ...prev, metric: e.target.value }))}
+            className="bg-dark-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-neon-cyan outline-none"
+          >
+            <option value="all">All Metrics</option>
+            {metricOptions.map((metric) => (
+              <option key={metric} value={metric}>{formatMetricName(metric)}</option>
+            ))}
+          </select>
+          <select
+            value={filters.source}
+            onChange={(e) => setFilters((prev) => ({ ...prev, source: e.target.value }))}
+            className="bg-dark-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-neon-cyan outline-none"
+          >
+            <option value="all">All Sources</option>
+            {sourceOptions.map((source) => (
+              <option key={source} value={source}>{source}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setFilters({ search: '', metric: 'all', source: 'all' })}
+            className="px-3 py-2 rounded-lg bg-gray-700 text-white hover:bg-gray-600 transition-all"
+          >
+            Reset Filters
+          </button>
+        </div>
+      </div>
+
+      {filteredAlerts.length === 0 ? (
         <div className="card-border p-6 bg-dark-800">
           <div className="flex items-center gap-4">
             <CheckCircle className="w-8 h-8 text-neon-green flex-shrink-0" />
             <div>
-              <h3 className="text-white font-semibold">All Systems Healthy</h3>
-              <p className="text-gray-400 text-sm mt-1">No alerts in the last 24 hours</p>
+              <h3 className="text-white font-semibold">{alerts.length === 0 ? 'All Systems Healthy' : 'No Matching Alerts'}</h3>
+              <p className="text-gray-400 text-sm mt-1">
+                {alerts.length === 0 ? 'No alerts in the last 24 hours' : 'Try changing filters to see more alerts'}
+              </p>
             </div>
           </div>
         </div>
       ) : (
         <div className="space-y-4">
-          {alerts.map((alert) => (
+          {filteredAlerts.map((alert) => (
             <div
               key={alert.id}
               className="card-border card-hover p-6 bg-dark-800 flex items-start gap-4 border border-opacity-50"
-              style={{ borderColor: getStatusColor(alert.status) }}
+              style={{ borderColor: getStatusColor() }}
             >
-              <div className={getAlertColor(alert.status)}>{getAlertIcon(alert.status)}</div>
+              <div className={getAlertColor()}>{getAlertIcon()}</div>
               <div className="flex-1">
                 <div className="flex items-center justify-between">
                   <h3 className="text-white font-semibold">{formatMetricName(alert.metric_type)}</h3>
-                  <span className="px-3 py-1 rounded text-xs font-semibold text-dark-900" style={{ backgroundColor: getStatusColor(alert.status) }}>
-                    {alert.status.toUpperCase()}
+                  <span className="px-3 py-1 rounded text-xs font-semibold text-dark-900" style={{ backgroundColor: getStatusColor() }}>
+                    ALERT
                   </span>
                 </div>
                 <p className="text-gray-400 text-sm mt-2">{alert.message}</p>

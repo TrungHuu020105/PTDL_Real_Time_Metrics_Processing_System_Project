@@ -20,6 +20,7 @@ export default function SupportChat() {
   const [messages, setMessages] = useState([])
   const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(false)
+  const [thinkingConversationId, setThinkingConversationId] = useState(null)
   const [statusFilter, setStatusFilter] = useState('all')
 
   const [issueTemplates, setIssueTemplates] = useState([])
@@ -44,6 +45,7 @@ export default function SupportChat() {
   )
 
   const loadConversations = async () => {
+    if (document.visibilityState === 'hidden') return
     if (conversationsLoadingRef.current) return
     try {
       conversationsLoadingRef.current = true
@@ -63,6 +65,7 @@ export default function SupportChat() {
 
   const loadMessages = async (conversationId) => {
     if (!conversationId) return
+    if (document.visibilityState === 'hidden') return
     if (messagesLoadingRef.current) return
     try {
       messagesLoadingRef.current = true
@@ -76,6 +79,7 @@ export default function SupportChat() {
   }
 
   const loadIssueTemplates = async () => {
+    if (document.visibilityState === 'hidden') return
     if (templatesLoadingRef.current) return
     try {
       templatesLoadingRef.current = true
@@ -94,10 +98,10 @@ export default function SupportChat() {
     loadIssueTemplates()
     const interval = setInterval(() => {
       loadConversations()
-    }, 8000)
+    }, 15000)
     const templatesInterval = setInterval(() => {
       loadIssueTemplates()
-    }, 30000)
+    }, 60000)
     return () => {
       clearInterval(interval)
       clearInterval(templatesInterval)
@@ -107,15 +111,25 @@ export default function SupportChat() {
   useEffect(() => {
     loadMessages(selectedConversationId)
     if (!selectedConversationId) return
-    const interval = setInterval(() => loadMessages(selectedConversationId), 5000)
+    const interval = setInterval(() => loadMessages(selectedConversationId), 10000)
     return () => clearInterval(interval)
   }, [selectedConversationId])
 
   const sendUserMessage = async (contentOverride = null) => {
     const content = (contentOverride ?? message).trim()
     if (!content) return
+    const fallbackConversationId = selectedConversationId
+    const optimisticMessage = {
+      id: `temp-${Date.now()}`,
+      conversation_id: fallbackConversationId,
+      sender_type: 'user',
+      content,
+      created_at: new Date().toISOString(),
+    }
     try {
       setLoading(true)
+      setMessages((prev) => [...prev, optimisticMessage])
+      setThinkingConversationId(fallbackConversationId || -1)
       const res = await api.post('/api/chat/send', {
         conversation_id: selectedConversationId || null,
         message: content,
@@ -125,11 +139,14 @@ export default function SupportChat() {
       setShowOtherIssueInput(false)
       setOtherIssueText('')
       if (cid) setSelectedConversationId(cid)
+      setThinkingConversationId(cid || null)
       await loadConversations()
       if (cid) await loadMessages(cid)
     } catch (err) {
       console.error('Failed to send user message:', err)
+      setMessages((prev) => prev.filter((m) => m.id !== optimisticMessage.id))
     } finally {
+      setThinkingConversationId(null)
       setLoading(false)
     }
   }
@@ -422,6 +439,17 @@ export default function SupportChat() {
                 </div>
               )
             })}
+            {!isAdmin && selectedConversation && thinkingConversationId === selectedConversation.id && (
+              <div className="flex justify-start">
+                <div className="max-w-[80%] px-4 py-3 rounded-xl border bg-dark-900 border-gray-700 text-gray-100">
+                  <div className="flex items-center gap-2 text-xs opacity-80 mb-1">
+                    <Bot className="w-4 h-4" />
+                    <span>bot</span>
+                  </div>
+                  <p className="text-base text-gray-200 animate-pulse">Thinking</p>
+                </div>
+              </div>
+            )}
             {selectedConversation && messages.length === 0 && <p className="text-gray-500 text-sm">No message yet.</p>}
           </div>
 

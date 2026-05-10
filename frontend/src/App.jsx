@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { AuthProvider, useAuth } from './context/AuthContext'
 import { DeviceProvider } from './context/DeviceContext'
 import { NotificationProvider } from './context/NotificationContext'
@@ -22,20 +22,26 @@ function AppContent() {
   const [activeMenu, setActiveMenu] = useState('iot-devices')
   const [health, setHealth] = useState(null)
   const { user, token, loading } = useAuth()
+  const healthInFlightRef = useRef(false)
 
   useEffect(() => {
     // Check backend health
     const checkHealth = async () => {
+      if (healthInFlightRef.current) return
+      if (document.visibilityState === 'hidden') return
       try {
+        healthInFlightRef.current = true
         const response = await api.get('/api/health')
         setHealth(response.data)
       } catch (error) {
         console.error('Backend not available:', error)
+      } finally {
+        healthInFlightRef.current = false
       }
     }
 
     checkHealth()
-    const interval = setInterval(checkHealth, 10000)
+    const interval = setInterval(checkHealth, 20000)
     return () => clearInterval(interval)
   }, [])
 

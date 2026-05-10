@@ -14,6 +14,7 @@ export default function IoTDeviceManager() {
   const { user } = useAuth()
   const { notify } = useNotification()
   const isAdmin = user?.role === 'admin'
+  const isDev = import.meta.env.DEV
   
   // Use allIoTDevices if admin, otherwise use iotDevices
   const displayDevices = isAdmin ? allIoTDevices : iotDevices
@@ -49,18 +50,11 @@ export default function IoTDeviceManager() {
     }
   }, [isAdmin])
   
-  // Debug log
+  // Keep debug logs only in development.
   useEffect(() => {
-    console.log('IoTDeviceManager - user:', user)
-    console.log('IoTDeviceManager - isAdmin:', isAdmin)
-    console.log('IoTDeviceManager - iotDevices:', iotDevices)
-    console.log('IoTDeviceManager - allIoTDevices:', allIoTDevices)
-    console.log('IoTDeviceManager - displayDevices:', displayDevices)
-    if (displayDevices && displayDevices.length > 0) {
-      console.log('First device details:', displayDevices[0])
-      console.log('Device keys:', Object.keys(displayDevices[0]))
-    }
-  }, [isAdmin, iotDevices, allIoTDevices, displayDevices])
+    if (!isDev) return
+    console.log('IoTDeviceManager devices:', displayDevices?.length || 0)
+  }, [isDev, displayDevices?.length])
   const wsRef = useRef(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
@@ -126,6 +120,7 @@ export default function IoTDeviceManager() {
   const [newTelegramChatId, setNewTelegramChatId] = useState('')
   const [newEmail, setNewEmail] = useState('')
   const [settingsLoading, setSettingsLoading] = useState(false)
+  const latestMetricsInFlightRef = useRef(false)
   const getMetricValue = (m) => m?.metric_value ?? m?.value
   const getMetricTimestamp = (m) => m?.event_ts ?? m?.timestamp
 
@@ -183,7 +178,10 @@ export default function IoTDeviceManager() {
   // Fetch latest metrics for all devices
   useEffect(() => {
     const fetchLatestMetrics = async () => {
+      if (latestMetricsInFlightRef.current) return
+      if (document.visibilityState === 'hidden') return
       try {
+        latestMetricsInFlightRef.current = true
         const metrics = {}
         for (const device of displayDevices) {
           try {
@@ -224,12 +222,14 @@ export default function IoTDeviceManager() {
         setLatestMetrics(metrics)
       } catch (err) {
         console.error('Failed to fetch latest metrics:', err)
+      } finally {
+        latestMetricsInFlightRef.current = false
       }
     }
 
-    // Fetch immediately and then every 5 seconds
+    // Fetch immediately and then every 15 seconds
     fetchLatestMetrics()
-    const interval = setInterval(fetchLatestMetrics, 5000)
+    const interval = setInterval(fetchLatestMetrics, 15000)
     return () => clearInterval(interval)
   }, [displayDevices])
 
@@ -242,17 +242,16 @@ export default function IoTDeviceManager() {
         const clientId = `frontend_iot_${Date.now()}`
         const wsUrl = `ws://${serverUrl}:${serverPort}/api/ws/${clientId}`
         
-        console.log('[IoTDeviceManager] Connecting to WebSocket:', wsUrl)
+        if (isDev) console.log('[IoTDeviceManager] Connecting to WebSocket:', wsUrl)
         wsRef.current = new WebSocket(wsUrl)
         
         wsRef.current.onopen = () => {
-          console.log('[IoTDeviceManager] WebSocket connected for realtime updates')
+          if (isDev) console.log('[IoTDeviceManager] WebSocket connected for realtime updates')
         }
         
         wsRef.current.onmessage = (event) => {
           try {
             const message = JSON.parse(event.data)
-            console.log('[IoTDeviceManager] Received WebSocket message:', message)
             
             // Handle realtime IoT metric broadcasts
             if (message.type === 'iot_metric' && message.metric_type && message.value !== undefined) {
@@ -276,19 +275,18 @@ export default function IoTDeviceManager() {
         }
         
         wsRef.current.onerror = (event) => {
-          console.error('[IoTDeviceManager] WebSocket error:', event)
-          console.error('[IoTDeviceManager] WebSocket error type:', event.type)
-          console.error('[IoTDeviceManager] WebSocket ready state:', wsRef.current?.readyState)
-          // 0=CONNECTING, 1=OPEN, 2=CLOSING, 3=CLOSED
-          console.error('[IoTDeviceManager] Error connecting to:', wsUrl)
+          if (isDev) {
+            console.error('[IoTDeviceManager] WebSocket error:', event)
+            console.error('[IoTDeviceManager] WebSocket ready state:', wsRef.current?.readyState)
+          }
         }
         
         wsRef.current.onclose = () => {
-          console.log('[IoTDeviceManager] WebSocket disconnected, reconnecting...')
+          if (isDev) console.log('[IoTDeviceManager] WebSocket disconnected, reconnecting...')
           setTimeout(connectWebSocket, 3000)
         }
       } catch (err) {
-        console.error('[IoTDeviceManager] Failed to connect WebSocket:', err)
+        if (isDev) console.error('[IoTDeviceManager] Failed to connect WebSocket:', err)
       }
     }
     
@@ -299,7 +297,7 @@ export default function IoTDeviceManager() {
         wsRef.current.close()
       }
     }
-  }, [displayDevices])
+  }, [displayDevices, isDev])
 
   // Helper function to aggregate data by minute (1 point per minute)
   const aggregateDataByMinute = (rawData) => {

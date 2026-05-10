@@ -1,7 +1,7 @@
 """
 WebSocket Connection Manager để quản lý các client kết nối
 """
-from typing import Dict, Set, Optional
+from typing import Dict, Optional, Any
 from fastapi import WebSocket
 from datetime import datetime
 import json
@@ -18,7 +18,7 @@ class ConnectionManager:
         self.active_connections: Dict[str, Dict] = {}
         self.client_metrics: Dict[str, Dict] = {}  # Lưu metrics mới nhất của mỗi client
     
-    async def connect(self, client_id: str, websocket: WebSocket):
+    async def connect(self, client_id: str, websocket: WebSocket, metadata: Optional[Dict[str, Any]] = None):
         """
         Thêm một client mới vào danh sách kết nối.
         """
@@ -27,7 +27,8 @@ class ConnectionManager:
             "websocket": websocket,
             "status": "online",
             "connected_at": datetime.now().isoformat(),
-            "last_data": None
+            "last_data": None,
+            "metadata": metadata or {},
         }
         print(f"✅ Client {client_id} đã kết nối. Tổng clients: {len(self.active_connections)}")
     
@@ -94,3 +95,14 @@ class ConnectionManager:
                 await info["websocket"].send_text(message)
             except Exception as e:
                 print(f"⚠️ Lỗi khi broadcast tới {client_id}: {e}")
+
+    async def send_to_client(self, client_id: str, message: str):
+        """Send a message to one specific client."""
+        info = self.active_connections.get(client_id)
+        if not info:
+            return
+        try:
+            await info["websocket"].send_text(message)
+        except Exception as e:
+            print(f"⚠️ Lỗi khi gửi tới {client_id}: {e}")
+

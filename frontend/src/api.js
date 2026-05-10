@@ -1,26 +1,38 @@
 import axios from 'axios'
 
-// Detect server URL based on environment
-const getServerURL = () => {
-    // If running in development with Vite, use the server IP
-    // Change this to your actual server IP if needed
-    const serverIP =
-        import.meta.env.VITE_SERVER_IP || 'localhost'
-    const serverPort =
-        import.meta.env.VITE_SERVER_PORT || '8000'
+const coreIP = import.meta.env.VITE_CORE_SERVER_IP || import.meta.env.VITE_SERVER_IP || 'localhost'
+const corePort = import.meta.env.VITE_CORE_SERVER_PORT || import.meta.env.VITE_SERVER_PORT || '8000'
+const iotIP = import.meta.env.VITE_IOT_SERVER_IP || coreIP
+const iotPort = import.meta.env.VITE_IOT_SERVER_PORT || (iotIP === 'localhost' ? '8100' : corePort)
+const coreBaseURL = `http://${coreIP}:${corePort}`
+const iotBaseURL = `http://${iotIP}:${iotPort}`
 
-    const url = `http://${serverIP}:${serverPort}`
-    console.log('[API] Server URL:', url)
-    return url
-}
+const iotApiPrefixes = [
+    '/api/health',
+    '/api/iot-devices',
+    '/api/metrics',
+    '/api/alerts',
+    '/api/admin/iot-devices',
+]
+
+const isIotApi = (url = '') => iotApiPrefixes.some(prefix => url.startsWith(prefix))
 
 const api = axios.create({
-    baseURL: getServerURL(),
+    baseURL: coreBaseURL,
     headers: {
         'Content-Type': 'application/json',
     },
     timeout: 30000 // 30 second timeout
 })
+
+api.interceptors.request.use((config) => {
+    const targetBase = isIotApi(config.url || '') ? iotBaseURL : coreBaseURL
+    config.baseURL = targetBase
+    return config
+})
+
+console.log('[API] Core Base URL:', coreBaseURL)
+console.log('[API] IoT Base URL:', iotBaseURL)
 
 // Add error handling
 api.interceptors.response.use(

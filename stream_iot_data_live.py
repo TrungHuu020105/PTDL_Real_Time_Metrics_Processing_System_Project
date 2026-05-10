@@ -1,181 +1,184 @@
 """
-Live IoT Data Streamer - Send sensor data directly to Dashboard via WebSocket
-(No database save - pure real-time streaming)
+Live IoT Data MQTT Publisher - publish sensor data continuously for integration testing.
 
 Usage:
-    python stream_iot_data_live.py                      # Stream to localhost
-    python stream_iot_data_live.py --server 192.168.1.100:8000
-    python stream_iot_data_live.py --interval 10        # Custom interval
+    python stream_iot_data_live.py
+    python stream_iot_data_live.py --broker 127.0.0.1 --port 1883
+    python stream_iot_data_live.py --interval 5
+    python stream_iot_data_live.py --topic-template sensors/{source}/data
+    python stream_iot_data_live.py --topic sensors/sensor-01/data
 """
 
-import asyncio
-import json
 import argparse
-from datetime import datetime
+import json
 import sys
+import time
+from datetime import datetime
 
 try:
-    import websockets
-    # Don't import deprecated class
+    import paho.mqtt.client as mqtt
 except ImportError:
-    print("❌ websockets not installed. Install with:")
-    print("   pip install websockets")
+    print("paho-mqtt not installed. Install with: pip install paho-mqtt")
     sys.exit(1)
 
-# Import sensor generation logic
 from generate_iot_data import IoTDataGenerator
 
 DEFAULT_TIMEZONE = "Asia/Ho_Chi_Minh"
 
 
-class LiveIoTStreamer:
-    """Stream live sensor data to dashboard without database save"""
-    
-    def __init__(self, server_url: str = "ws://localhost:8000/api/ws/iot_generator", interval: int = 5):
-        self.server_url = server_url
+class LiveIoTMqttPublisher:
+    """Publish live sensor data to MQTT continuously."""
+
+    def __init__(
+        self,
+        broker: str = "127.0.0.1",
+        port: int = 1883,
+        interval: int = 5,
+        topic_template: str = "sensors/{source}/data",
+        fixed_topic: str | None = None,
+        username: str = "",
+        password: str = "",
+    ):
+        self.broker = broker
+        self.port = port
         self.interval = interval
+        self.topic_template = topic_template
+        self.fixed_topic = fixed_topic
+        self.username = username
+        self.password = password
+
         self.generator = IoTDataGenerator()
         self.batch_count = 0
         self.total_records = 0
-        self.ws = None  # WebSocket connection
-    
-    async def connect(self):
-        """Connect to WebSocket"""
+        self.client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+
+        if self.username:
+            self.client.username_pw_set(self.username, self.password)
+
+    def connect(self):
+        print(f"Connecting MQTT broker {self.broker}:{self.port} ...")
+        self.client.connect(self.broker, self.port, 60)
+        self.client.loop_start()
+        print("Connected MQTT broker. Ready to publish.\n")
+
+    def disconnect(self):
         try:
-            print(f"🔗 Connecting to {self.server_url}...")
-            self.ws = await websockets.connect(self.server_url)
-            print(f"✅ Connected! Ready to stream data.\n")
-        except Exception as e:
-            print(f"❌ Failed to connect: {e}")
-            raise
-    
-    async def stream_batch(self):
-        """Generate 1 batch and stream to dashboard"""
+            self.client.loop_stop()
+            self.client.disconnect()
+        except Exception:
+            pass
+
+    def _resolve_topic(self, source: str) -> str:
+        if self.fixed_topic:
+            return self.fixed_topic
+        return self.topic_template.format(source=source)
+
+    def publish_batch(self):
         self.batch_count += 1
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        try:
-            # Generate 1 batch (5 metrics)
-            metrics_to_send = self.generator.run_once(save_to_db=False)
-            
-            if not metrics_to_send:
-                return
-            
-            total_generated = len(metrics_to_send["metrics"])
-            total_saved = len([m for m in metrics_to_send["metrics"] if m.get("saved", True)])
-            total_dropped = total_generated - total_saved
-            
-            self.total_records += total_generated
-            
-            # Send EACH metric to WebSocket (ALL data, no filtering)
-            # Frontend will receive 100% of data for smooth realtime display
-            for metric in metrics_to_send["metrics"]:
-                data = {
-                    "timestamp": metric.get("timestamp", datetime.now().isoformat()),
-                    "metric_type": metric.get("metric_type"),
-                    "value": metric.get("value"),
-                    "source": metric.get("source"),
-                    "unit": metric.get("unit", ""),
-                    "saved": metric.get("saved", False)  # Flag for backend DB filtering
-                }
-                
-                # Send to WebSocket
-                if self.ws is not None:
-                    await self.ws.send(json.dumps(data))
-            
-            # Print batch summary
-            print(f"[{timestamp}] Batch #{self.batch_count} | "
-                  f"Generated: {total_generated} | "
-                  f"DB-Worthy: {total_saved} | "
-                  f"Realtime-Only: {total_dropped} | "
-                  f"Timezone: {DEFAULT_TIMEZONE}")
-            
-            # Print detail per sensor
-            for metric in metrics_to_send["metrics"]:
-                status = "📊 STREAM" if metric.get("saved", True) else "📡 STREAM*"
-                reason = metric.get("reason", "sent to dashboard")
-                print(f"  {status} {metric['metric_type']:20} = {metric['value']:8.2f} {metric['unit']:5} | {reason}")
-            
-            print()
-            
-        except Exception as e:
-            print(f"❌ Error in batch: {e}")
-            raise
-    
-    async def run_continuous(self):
-        """Stream data continuously"""
+
+        metrics_to_send = self.generator.run_once(save_to_db=False)
+        if not metrics_to_send:
+            return
+
+        metrics = metrics_to_send.get("metrics", [])
+        self.total_records += len(metrics)
+
+        db_worthy = len([m for m in metrics if m.get("saved", True)])
+        realtime_only = len(metrics) - db_worthy
+
+        for metric in metrics:
+            payload = {
+                "timestamp": metric.get("timestamp", datetime.now().isoformat()),
+                "metric_type": metric.get("metric_type"),
+                "value": metric.get("value"),
+                "source": metric.get("source"),
+                "unit": metric.get("unit", ""),
+                "saved": metric.get("saved", False),
+            }
+
+            topic = self._resolve_topic(str(payload["source"]))
+            result = self.client.publish(topic, json.dumps(payload), qos=0, retain=False)
+            if result.rc != mqtt.MQTT_ERR_SUCCESS:
+                print(f"Publish failed topic={topic} rc={result.rc}")
+
+        print(
+            f"[{timestamp}] Batch #{self.batch_count} | Published: {len(metrics)} | "
+            f"DB-Worthy: {db_worthy} | Realtime-Only: {realtime_only} | TZ: {DEFAULT_TIMEZONE}"
+        )
+
+        for metric in metrics:
+            topic = self._resolve_topic(str(metric.get("source")))
+            status = "MQTT"
+            reason = metric.get("reason", "published")
+            print(
+                f"  {status} {metric['metric_type']:20} = {metric['value']:8.2f} {metric['unit']:5} | "
+                f"topic={topic} | {reason}"
+            )
+        print()
+
+    def run_continuous(self):
         print("=" * 100)
-        print("🚀 LIVE IoT DATA STREAMER (Real-Time Dashboard Feed)")
+        print("LIVE IoT DATA MQTT PUBLISHER")
         print("=" * 100)
-        print(f"📡 Server: {self.server_url}")
-        print(f"⏰ Interval: {self.interval}s per batch")
-        print(f"📊 Each batch: 5 metrics (temperature, humidity, etc.)")
-        print("🛑 Press Ctrl+C to stop\n")
-        
+        print(f"Broker: {self.broker}:{self.port}")
+        print(f"Interval: {self.interval}s per batch")
+        print(f"Topic template: {self.topic_template}")
+        if self.fixed_topic:
+            print(f"Fixed topic override: {self.fixed_topic}")
+        print("Press Ctrl+C to stop\n")
+
+        self.connect()
+
         try:
             while True:
-                try:
-                    if self.ws is None:
-                        await self.connect()
-                    
-                    await self.stream_batch()
-                    await asyncio.sleep(self.interval)
-                
-                except Exception as e:
-                    print(f"❌ Connection error: {e}")
-                    print("🔄 Attempting to reconnect in 3 seconds...")
-                    self.ws = None
-                    await asyncio.sleep(3)
-        
+                self.publish_batch()
+                time.sleep(self.interval)
         except KeyboardInterrupt:
             print("\n" + "=" * 100)
-            print("🛑 STOPPED BY USER")
+            print("STOPPED BY USER")
             print("=" * 100)
-            print(f"📊 Total batches streamed: {self.batch_count}")
-            print(f"📥 Total metrics sent: {self.total_records}")
-            print(f"⏱️  Runtime: ~{self.batch_count * self.interval} seconds")
-            print(f"⚡ Average: {self.total_records // max(self.batch_count, 1)} metrics per batch")
+            print(f"Total batches published: {self.batch_count}")
+            print(f"Total metrics published: {self.total_records}")
+            print(f"Approx runtime: {self.batch_count * self.interval} seconds")
             print("=" * 100)
-        
         finally:
-            if self.ws:
-                await self.ws.close()
-                print("🔌 Disconnected from WebSocket\n")
+            self.disconnect()
+            print("Disconnected MQTT\n")
 
 
 def main():
-    """Main entry point"""
-    parser = argparse.ArgumentParser(
-        description="Stream live IoT sensor data to dashboard (no database save)",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python stream_iot_data_live.py                              # Stream to localhost:8000
-  python stream_iot_data_live.py --server 192.168.1.100:8000 # Custom server
-  python stream_iot_data_live.py --interval 10                # 10s between batches
-        """
-    )
+    parser = argparse.ArgumentParser(description="Publish live IoT sensor data to MQTT continuously")
+    parser.add_argument("--broker", type=str, default="127.0.0.1", help="MQTT broker host")
+    parser.add_argument("--port", type=int, default=1883, help="MQTT broker port")
+    parser.add_argument("--interval", type=int, default=5, help="Interval seconds between batches")
     parser.add_argument(
-        "--server",
+        "--topic-template",
         type=str,
-        default="localhost:8000",
-        help="WebSocket server (default: localhost:8000)"
+        default="sensors/{source}/data",
+        help="Topic template. Use {source} placeholder",
     )
     parser.add_argument(
-        "--interval",
-        type=int,
-        default=5,
-        help="Interval in seconds (default: 5)"
+        "--topic",
+        type=str,
+        default="",
+        help="Fixed topic override for all metrics (e.g., sensors/sensor-01/data)",
     )
-    
+    parser.add_argument("--username", type=str, default="", help="MQTT username")
+    parser.add_argument("--password", type=str, default="", help="MQTT password")
+
     args = parser.parse_args()
-    
-    # Build WebSocket URL
-    server_url = f"ws://{args.server}/api/ws/iot_generator"
-    
-    # Run streamer
-    streamer = LiveIoTStreamer(server_url=server_url, interval=args.interval)
-    asyncio.run(streamer.run_continuous())
+
+    publisher = LiveIoTMqttPublisher(
+        broker=args.broker,
+        port=args.port,
+        interval=args.interval,
+        topic_template=args.topic_template,
+        fixed_topic=args.topic or None,
+        username=args.username,
+        password=args.password,
+    )
+    publisher.run_continuous()
 
 
 if __name__ == "__main__":

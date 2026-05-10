@@ -78,3 +78,4 @@ class StatusResponse(BaseModel):
     total_clients: int
     timestamp: str
     clients: List[ClientStatus]
+

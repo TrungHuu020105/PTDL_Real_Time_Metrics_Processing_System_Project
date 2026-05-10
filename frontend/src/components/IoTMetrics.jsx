@@ -134,10 +134,13 @@ export default function IoTMetrics() {
   useEffect(() => {
     const connectWebSocket = () => {
       try {
-        const serverUrl = import.meta.env.VITE_SERVER_IP || 'localhost'
-        const serverPort = import.meta.env.VITE_SERVER_PORT || '8000'
+        const coreServerUrl = import.meta.env.VITE_CORE_SERVER_IP || import.meta.env.VITE_SERVER_IP || 'localhost'
+        const corePort = import.meta.env.VITE_CORE_SERVER_PORT || import.meta.env.VITE_SERVER_PORT || '8000'
+        const iotServerUrl = import.meta.env.VITE_IOT_SERVER_IP || coreServerUrl
+        const iotPort = import.meta.env.VITE_IOT_SERVER_PORT || (iotServerUrl === 'localhost' ? '8100' : corePort)
         const clientId = `frontend_metrics_${Date.now()}`
-        const wsUrl = `ws://${serverUrl}:${serverPort}/api/ws/${clientId}`
+        const token = localStorage.getItem('access_token') || ''
+        const wsUrl = `ws://${iotServerUrl}:${iotPort}/api/ws/${clientId}?token=${encodeURIComponent(token)}`
         
         console.log('[IoTMetrics] Connecting to WebSocket:', wsUrl)
         wsRef.current = new WebSocket(wsUrl)

@@ -4,11 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
-from app.database import get_db
-from app.models import IoTDevice, User, Device, UserDevicePermission
-from app.api.routes_auth import get_current_user
-from app import crud
-from app.services.weather_service import geocode_location
+from iot_backend.database import get_db
+from iot_backend.models import IoTDevice, User, Device, UserDevicePermission
+from iot_backend.api.routes_auth import get_current_user
+from iot_backend import crud
+from iot_backend.services.weather_service import geocode_location
+import re
 
 router = APIRouter(prefix="/api/iot-devices", tags=["iot-devices"])
 
@@ -16,6 +17,14 @@ router = APIRouter(prefix="/api/iot-devices", tags=["iot-devices"])
 def _normalize_environment_type(value: Optional[str]) -> str:
     env = (value or "indoor").strip().lower()
     return "outdoor" if env == "outdoor" else "indoor"
+
+
+def _normalize_source(value: str) -> str:
+    source = (value or "").strip().lower()
+    match = re.fullmatch(r"sensor[-_]?0*(\d+)", source)
+    if match:
+        return f"sensor_{int(match.group(1))}"
+    return source
 
 
 # ============== SCHEMAS ==============
@@ -71,13 +80,20 @@ async def create_iot_device(
 ):
     """Create a new IoT device - User owned. Also registers in Device table for metric generation."""
     try:
+        normalized_source = _normalize_source(device_data.source)
+        if not normalized_source:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sensor source is required",
+            )
+
         # Check if source already exists in IoTDevice (user-owned table)
-        existing_iot = db.query(IoTDevice).filter(IoTDevice.source == device_data.source).first()
+        existing_iot = db.query(IoTDevice).filter(IoTDevice.source == normalized_source).first()
         
         if existing_iot:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"You already have a device with source '{device_data.source}'. Each sensor can only be used once per user."
+                detail=f"You already have a device with source '{normalized_source}'. Each sensor can only be used once per user."
             )
         
         environment_type = _normalize_environment_type(device_data.environment_type)
@@ -99,7 +115,7 @@ async def create_iot_device(
             user_id=user.id,
             name=device_data.name,
             device_type=device_data.device_type,
-            source=device_data.source,
+            source=normalized_source,
             location=device_data.location,
             environment_type=environment_type,
             location_query=location_query,
@@ -120,8 +136,8 @@ async def create_iot_device(
         print(f"[OK] IoTDevice created: {iot_device.id}")
         
         # Step 2: Check if Device record exists, if not create it
-        print(f"[DEBUG] Checking Device for metrics: {device_data.source}")
-        existing_device = db.query(Device).filter(Device.source == device_data.source).first()
+        print(f"[DEBUG] Checking Device for metrics: {normalized_source}")
+        existing_device = db.query(Device).filter(Device.source == normalized_source).first()
         
         if existing_device:
             # Device already exists (from demo or other user)
@@ -135,11 +151,11 @@ async def create_iot_device(
             device = existing_device
         else:
             # Create new Device record with is_active=True for metric generation
-            print(f"[DEBUG] Creating Device for metrics: {device_data.source}")
+            print(f"[DEBUG] Creating Device for metrics: {normalized_source}")
             device = Device(
                 name=device_data.name,
                 device_type=device_data.device_type,
-                source=device_data.source,
+                source=normalized_source,
                 location=device_data.location,
                 is_active=True,  # Enable metrics generation immediately
                 created_by=user.id
@@ -406,3 +422,4 @@ async def geocode_sensor_location(
         "latitude": geo.latitude,
         "longitude": geo.longitude,
     }
+

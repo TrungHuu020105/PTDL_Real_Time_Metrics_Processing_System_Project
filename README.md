@@ -362,6 +362,16 @@ npm run dev
 ```bash
 python stream_iot_data_live.py
 
+python stream_iot_data_live.py --broker 20.214.247.102 --port 1883 --topic sensors/sensor-01/data
+
+python stream_iot_data_live.py `
+  --broker 20.214.247.102 `
+  --port 1883 `
+  --username sensor_user `
+  --password 123456 `
+  --topic-template 'sensors/{source}/data'
+
+
 # Output:
 # [14:30:45] Batch #1 | Generated: 5 | Sent: 5 | Saved: 1
 #   ✅ SEND temperature = 24.50 °C

@@ -42,6 +42,14 @@ const getDeviceTypeFromCode = (code) => {
   return 'temperature'
 }
 
+const normalizeSensorCode = (code) => {
+  const raw = (code || '').toLowerCase().trim()
+  if (!raw) return raw
+  const m = raw.match(/^sensor[-_]?0*(\d+)$/)
+  if (m) return `sensor_${Number(m[1])}`
+  return raw
+}
+
 export default function AddDeviceModal({ isOpen, onClose, onAdd, isLoading }) {
   const [formData, setFormData] = useState({
     name: '',
@@ -65,13 +73,14 @@ export default function AddDeviceModal({ isOpen, onClose, onAdd, isLoading }) {
       return setError('Sensor code can only contain letters, numbers, hyphens, and underscores')
     }
 
-    const deviceType = getDeviceTypeFromCode(formData.sensorCode)
+    const normalizedSource = normalizeSensorCode(formData.sensorCode)
+    const deviceType = getDeviceTypeFromCode(normalizedSource)
     try {
       await onAdd({
         name: formData.name.trim(),
         location: formData.location.trim(),
         device_type: deviceType,
-        source: formData.sensorCode.toLowerCase().trim(),
+        source: normalizedSource,
       })
       setFormData({ name: '', location: '', sensorCode: '' })
       setUseCustomCode(false)

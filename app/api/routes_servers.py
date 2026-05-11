@@ -23,6 +23,8 @@ import threading
 class ServerUpdateRequest(BaseModel):
     name: Optional[str] = None
     specs: Optional[str] = None
+    price_per_month: Optional[float] = None
+    # Backward compatibility
     price_per_hour: Optional[float] = None
     cpu_cores: Optional[int] = None
     ram_gb: Optional[int] = None
@@ -996,7 +998,8 @@ async def get_system_info(admin: User = Depends(verify_admin)):
 @router.put("/admin/servers/{server_id}/price")
 async def set_server_price(
     server_id: str,
-    price_per_hour: float,
+    price_per_month: Optional[float] = None,
+    price_per_hour: Optional[float] = None,
     admin: User = Depends(verify_admin),
     db: Session = Depends(get_db)
 ):
@@ -1008,7 +1011,14 @@ async def set_server_price(
             detail="Server not found"
         )
     
-    if price_per_hour < 0:
+    effective_price_per_month = price_per_month if price_per_month is not None else price_per_hour
+    if effective_price_per_month is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="price_per_month is required"
+        )
+
+    if effective_price_per_month < 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Price cannot be negative"
@@ -1020,7 +1030,7 @@ async def set_server_price(
         payload={
             "display_name": remote_server.get("display_name") or remote_server.get("name"),
             "specifications": remote_server.get("specifications"),
-            "price_per_month": price_per_hour,
+            "price_per_month": effective_price_per_month,
             "description": remote_server.get("description"),
             "is_available": bool(remote_server.get("is_available", True)),
         },
@@ -1029,7 +1039,7 @@ async def set_server_price(
 
     return {
         "server_id": str(server_id),
-        "price_per_month": price_per_hour,
+        "price_per_month": effective_price_per_month,
         "message": "Price metadata updated successfully"
     }
 
@@ -1049,7 +1059,13 @@ async def update_server(
             detail="Server not found"
         )
 
-    if server_data.price_per_hour is not None and server_data.price_per_hour < 0:
+    effective_price_per_month = (
+        server_data.price_per_month
+        if server_data.price_per_month is not None
+        else server_data.price_per_hour
+    )
+
+    if effective_price_per_month is not None and effective_price_per_month < 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Price cannot be negative"
@@ -1057,7 +1073,7 @@ async def update_server(
 
     updated_display_name = server_data.name if server_data.name is not None else (remote_server.get("display_name") or remote_server.get("name"))
     updated_specs = server_data.specs if server_data.specs is not None else remote_server.get("specifications")
-    updated_price = server_data.price_per_hour if server_data.price_per_hour is not None else remote_server.get("price_per_month")
+    updated_price = effective_price_per_month if effective_price_per_month is not None else remote_server.get("price_per_month")
     updated_desc = remote_server.get("description")
     updated_available = bool(remote_server.get("is_available", True))
 

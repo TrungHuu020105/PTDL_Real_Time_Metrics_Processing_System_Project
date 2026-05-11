@@ -8,6 +8,7 @@ Usage:
 
 import time
 import requests
+import os
 from datetime import datetime
 
 
@@ -18,7 +19,7 @@ def collect_metrics(interval: int = 2):
     Args:
         interval: Seconds between collections (default: 2 seconds)
     """
-    BASE_URL = "http://localhost:8000"
+    BASE_URL = os.getenv("BACKEND_URL", "http://localhost:8000").rstrip("/")
     
     print("=" * 70)
     print("🚀 SYSTEM METRICS COLLECTOR")

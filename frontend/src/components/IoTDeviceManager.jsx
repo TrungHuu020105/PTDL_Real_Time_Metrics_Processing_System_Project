@@ -33,7 +33,7 @@ export default function IoTDeviceManager() {
         try {
           const response = await api.get('/api/admin/iot-devices/users-summary')
           setAdminSummary(response.data)
-          console.log('Admin summary fetched:', response.data)
+          if (isDev) console.log('Admin summary fetched:', response.data)
         } catch (error) {
           console.error('Failed to fetch admin summary:', error)
           setAdminSummary({
@@ -53,7 +53,7 @@ export default function IoTDeviceManager() {
   // Keep debug logs only in development.
   useEffect(() => {
     if (!isDev) return
-    console.log('IoTDeviceManager devices:', displayDevices?.length || 0)
+    if (isDev) console.log('IoTDeviceManager devices:', displayDevices?.length || 0)
   }, [isDev, displayDevices?.length])
   const wsRef = useRef(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
@@ -155,7 +155,7 @@ export default function IoTDeviceManager() {
             try {
               const response = await api.get(`/api/auth/users/${device.user_id}`)
               owners[device.id] = response.data.username || response.data.email
-              console.log(`Fetched owner for device ${device.id}:`, owners[device.id])
+              if (isDev) console.log(`Fetched owner for device ${device.id}:`, owners[device.id])
             } catch (err) {
               console.error(`Failed to fetch owner for device ${device.id}:`, err)
               owners[device.id] = `User #${device.user_id}`
@@ -164,7 +164,7 @@ export default function IoTDeviceManager() {
         }
         
         setDeviceOwners(owners)
-        console.log('All device owners fetched:', owners)
+        if (isDev) console.log('All device owners fetched:', owners)
       } catch (err) {
         console.error('Failed to fetch owner information:', err)
       }
@@ -386,7 +386,7 @@ export default function IoTDeviceManager() {
 
     const refreshChartData = async () => {
       try {
-        console.log('Refreshing chart data for device:', selectedDeviceForChart.device_type)
+        if (isDev) console.log('Refreshing chart data for device:', selectedDeviceForChart.device_type)
         const response = await api.get('/api/metrics/history', {
           params: {
             metric_type: selectedDeviceForChart.device_type,
@@ -414,7 +414,7 @@ export default function IoTDeviceManager() {
         
         setChartData(formattedData)
         setChartLastUpdated(new Date())
-        console.log('Chart updated at (VN):', formatVNTime(new Date(), true))
+        if (isDev) console.log('Chart updated at (VN):', formatVNTime(new Date(), true))
       } catch (err) {
         console.error('Failed to refresh chart data:', err)
       }
@@ -691,25 +691,25 @@ export default function IoTDeviceManager() {
 
     try {
       setSavingAlerts(true)
-      console.log('API URL:', api.defaults.baseURL)
-      console.log('Auth Header:', api.defaults.headers.common['Authorization'])
-      console.log('Sending threshold data:', thresholdData)
+      if (isDev) console.log('API URL:', api.defaults.baseURL)
+      if (isDev) console.log('Auth Header:', api.defaults.headers.common['Authorization'])
+      if (isDev) console.log('Sending threshold data:', thresholdData)
       
       const response = await api.put(`/api/iot-devices/${selectedDeviceForAlert.id}/alert-thresholds`, thresholdData)
-      console.log('Response received:', response.data)
+      if (isDev) console.log('Response received:', response.data)
       notify('âœ… ' + response.data.message)
       setShowAlertThresholdsModal(false)
       
       // Refresh ALL devices to get updated threshold values
-      console.log('Refreshing device list...')
+      if (isDev) console.log('Refreshing device list...')
       if (isAdmin) {
-        console.log('Admin user - fetching all devices')
+        if (isDev) console.log('Admin user - fetching all devices')
         await fetchAllIoTDevices()
       } else {
-        console.log('Regular user - fetching my devices')
+        if (isDev) console.log('Regular user - fetching my devices')
         await fetchIoTDevices()
       }
-      console.log('Device list refreshed successfully')
+      if (isDev) console.log('Device list refreshed successfully')
     } catch (err) {
       console.error('Full error object:', err)
       console.error('Error message:', err.message)
@@ -792,15 +792,15 @@ export default function IoTDeviceManager() {
     }
   }
 
-  const getDeviceTypeColor = (type) => {
-    const colors = {
-      temperature: 'neon-orange',
-      humidity: 'neon-cyan',
-      soil_moisture: 'neon-green',
-      light_intensity: 'neon-yellow',
-      pressure: 'neon-purple'
+  const getDeviceTypeBadgeClass = (type) => {
+    const styles = {
+      temperature: 'text-neon-orange bg-neon-orange/20',
+      humidity: 'text-neon-cyan bg-neon-cyan/20',
+      soil_moisture: 'text-neon-green bg-neon-green/20',
+      light_intensity: 'text-neon-yellow bg-neon-yellow/20',
+      pressure: 'text-neon-purple bg-neon-purple/20',
     }
-    return colors[type] || 'neon-cyan'
+    return styles[type] || 'text-neon-cyan bg-neon-cyan/20'
   }
 
   const getMetricUnit = (type) => {
@@ -825,8 +825,8 @@ export default function IoTDeviceManager() {
   // Check if alert is triggered for a device
   const checkAlertTriggered = (device) => {
     const latestValue = latestMetrics[device.id]?.value
-    console.log(`[checkAlertTriggered] Device: ${device.name}, latestValue: ${latestValue}, alert_enabled: ${device.alert_enabled}`)
-    console.log(`[checkAlertTriggered] Thresholds - Lower: ${device.lower_threshold}, Upper: ${device.upper_threshold}`)
+    if (isDev) console.log(`[checkAlertTriggered] Device: ${device.name}, latestValue: ${latestValue}, alert_enabled: ${device.alert_enabled}`)
+    if (isDev) console.log(`[checkAlertTriggered] Thresholds - Lower: ${device.lower_threshold}, Upper: ${device.upper_threshold}`)
     
     // If no value, no alert
     if (!latestValue) return { triggered: false, status: null }
@@ -842,13 +842,13 @@ export default function IoTDeviceManager() {
 
     // Check upper threshold (exceeds high limit)
     if (upperThreshold !== null && upperThreshold !== undefined && latestValue > upperThreshold) {
-      console.log(`[checkAlertTriggered] ALERT triggered (Upper) for ${device.name}: ${latestValue} > ${upperThreshold}`)
+      if (isDev) console.log(`[checkAlertTriggered] ALERT triggered (Upper) for ${device.name}: ${latestValue} > ${upperThreshold}`)
       return { triggered: true, status: 'upper', threshold: upperThreshold }
     }
 
     // Check lower threshold (falls below low limit)
     if (lowerThreshold !== null && lowerThreshold !== undefined && latestValue < lowerThreshold) {
-      console.log(`[checkAlertTriggered] ALERT triggered (Lower) for ${device.name}: ${latestValue} < ${lowerThreshold}`)
+      if (isDev) console.log(`[checkAlertTriggered] ALERT triggered (Lower) for ${device.name}: ${latestValue} < ${lowerThreshold}`)
       return { triggered: true, status: 'lower', threshold: lowerThreshold }
     }
 
@@ -1062,7 +1062,7 @@ export default function IoTDeviceManager() {
                         <p className="text-xs text-gray-500">Created by: {deviceOwners[device.id]}</p>
                       )}
                     </div>
-                    <span className={`text-xs text-${getDeviceTypeColor(device.device_type)} bg-${getDeviceTypeColor(device.device_type)}/20 px-2 py-1 rounded`}>
+                    <span className={`text-xs px-2 py-1 rounded ${getDeviceTypeBadgeClass(device.device_type)}`}>
                       {device.device_type}
                     </span>
                   </div>

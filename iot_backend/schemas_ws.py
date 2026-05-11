@@ -3,7 +3,7 @@ Pydantic schemas cho WebSocket metrics (Pydantic v2)
 """
 from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class MetricsData(BaseModel):
@@ -15,7 +15,7 @@ class MetricsData(BaseModel):
     """
     cpu: float = Field(..., ge=0, le=100, description="CPU usage percentage")
     ram: float = Field(..., ge=0, le=100, description="RAM usage percentage")
-    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     
     model_config = {
         "json_schema_extra": {
@@ -43,7 +43,7 @@ class IotMetricsData(BaseModel):
     source: str = Field(..., description="Sensor source ID")
     location: Optional[str] = Field(default=None, description="Sensor location")
     unit: str = Field(default="", description="Unit of measurement")
-    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     saved: bool = Field(default=True, description="Whether to save to database (True) or realtime-only (False)")
     
     model_config = {

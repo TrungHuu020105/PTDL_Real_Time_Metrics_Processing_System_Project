@@ -5,12 +5,12 @@ import psutil
 import requests
 from requests.exceptions import RequestException
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://172.20.10.4:8000").rstrip("/")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000").rstrip("/")
 SERVER_ID = int(os.getenv("SERVER_ID", "2"))
 SOURCE = os.getenv("SOURCE", f"server_{SERVER_ID}")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "123456")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 PUSH_INTERVAL_SECONDS = float(os.getenv("PUSH_INTERVAL_SECONDS", "2"))
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "10"))
 
@@ -25,7 +25,7 @@ def check_backend_connection() -> bool:
         return True
     except RequestException as exc:
         print(f"[ERROR] Cannot connect to backend {BACKEND_URL}: {exc}")
-        print("[HINT] Set BACKEND_URL to the host machine IP, e.g. http://172.20.10.4:8000")
+        print("[HINT] Set BACKEND_URL, e.g. http://localhost:8000 or your server URL")
         return False
 
 

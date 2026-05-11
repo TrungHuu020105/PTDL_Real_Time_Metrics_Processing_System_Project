@@ -1,8 +1,10 @@
 """CRUD operations for database"""
 
 from datetime import datetime, timedelta, timezone
+import time
 from typing import List, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 from iot_backend.models import (
     Metric,
     Alert,
@@ -464,18 +466,35 @@ def get_device_users(db: Session, device_id: int) -> List[User]:
 def get_user_accessible_sources(db: Session, user_id: int) -> List[str]:
     """Get list of metric sources (device sources) the user has access to"""
     sources = []
+
+    def _retry_all(query_fn, attempts: int = 3):
+        last_exc = None
+        for idx in range(attempts):
+            try:
+                return query_fn()
+            except OperationalError as exc:
+                db.rollback()
+                text = str(exc)
+                is_lock = "LockNotAvailable" in text or "lock timeout" in text.lower()
+                if not is_lock or idx == attempts - 1:
+                    last_exc = exc
+                    break
+                time.sleep(0.35 * (idx + 1))
+        if last_exc:
+            raise last_exc
+        return []
     
     user = get_user_by_id(db, user_id)
     
     if user and user.role == "admin":
         # Admins see ALL devices (no restrictions)
-        devices = db.query(Device).filter(Device.is_active == True).all()
+        devices = _retry_all(lambda: db.query(Device).filter(Device.is_active == True).all())
         sources.extend([d.source for d in devices])
         
-        iot_devices = db.query(IoTDevice).filter(IoTDevice.is_active == True).all()
+        iot_devices = _retry_all(lambda: db.query(IoTDevice).filter(IoTDevice.is_active == True).all())
         sources.extend([d.source for d in iot_devices])
 
-        metric_sources = db.query(Metric.sensor_id).distinct().all()
+        metric_sources = _retry_all(lambda: db.query(Metric.sensor_id).distinct().all())
         sources.extend([row[0] for row in metric_sources if row and row[0]])
     else:
         # Regular users see:
@@ -483,17 +502,17 @@ def get_user_accessible_sources(db: Session, user_id: int) -> List[str]:
         sources.append("system_monitor")
         
         # 2. Devices they CREATED themselves
-        user_devices = db.query(Device).filter(Device.created_by == user_id).all()
+        user_devices = _retry_all(lambda: db.query(Device).filter(Device.created_by == user_id).all())
         sources.extend([d.source for d in user_devices])
         
         # 3. IoT devices they own
-        iot_devices = db.query(IoTDevice).filter(IoTDevice.user_id == user_id).all()
+        iot_devices = _retry_all(lambda: db.query(IoTDevice).filter(IoTDevice.user_id == user_id).all())
         sources.extend([d.source for d in iot_devices])
 
         # 4. Server subscriptions (not needed for metrics, but keeping for compatibility)
-        subscriptions = db.query(ServerSubscription).filter(
-            ServerSubscription.user_id == user_id
-        ).all()
+        subscriptions = _retry_all(
+            lambda: db.query(ServerSubscription).filter(ServerSubscription.user_id == user_id).all()
+        )
         for sub in subscriptions:
             sources.append(f"server_{sub.server_id}")
 

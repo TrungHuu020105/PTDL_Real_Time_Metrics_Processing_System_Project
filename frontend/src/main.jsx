@@ -3,7 +3,11 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import './index.css'
 
-if (typeof window !== 'undefined' && !window.__metricsPulseAlertPatched) {
+if (
+  typeof window !== 'undefined' &&
+  import.meta.env.VITE_PATCH_WINDOW_ALERT === 'true' &&
+  !window.__metricsPulseAlertPatched
+) {
   window.__metricsPulseAlertPatched = true
   window.alert = (message) => {
     window.dispatchEvent(

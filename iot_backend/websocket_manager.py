@@ -3,7 +3,7 @@ WebSocket Connection Manager để quản lý các client kết nối
 """
 from typing import Dict, Optional, Any
 from fastapi import WebSocket
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 
 
@@ -26,7 +26,7 @@ class ConnectionManager:
         self.active_connections[client_id] = {
             "websocket": websocket,
             "status": "online",
-            "connected_at": datetime.now().isoformat(),
+            "connected_at": datetime.now(timezone.utc).isoformat(),
             "last_data": None,
             "metadata": metadata or {},
         }
@@ -47,7 +47,7 @@ class ConnectionManager:
         if client_id in self.active_connections:
             self.active_connections[client_id]["last_data"] = data
             self.active_connections[client_id]["status"] = "online"
-            self.active_connections[client_id]["last_update"] = datetime.now().isoformat()
+            self.active_connections[client_id]["last_update"] = datetime.now(timezone.utc).isoformat()
             self.client_metrics[client_id] = data
             print(f"📊 Nhận dữ liệu từ Client {client_id}: CPU={data.get('cpu', 'N/A')}%, RAM={data.get('ram', 'N/A')}%")
     
@@ -67,7 +67,7 @@ class ConnectionManager:
         
         return {
             "total_clients": len(self.active_connections),
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "clients": clients
         }
     

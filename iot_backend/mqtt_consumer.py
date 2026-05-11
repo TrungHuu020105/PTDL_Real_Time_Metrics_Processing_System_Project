@@ -6,7 +6,7 @@ Subscribes to MQTT topic, normalizes payload, then forwards to IoT websocket end
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import paho.mqtt.client as mqtt
 from websocket import create_connection
@@ -49,7 +49,7 @@ def _normalize_payload(raw_payload: bytes, topic: str) -> dict | None:
         "source": str(source),
         "location": payload.get("location"),
         "unit": payload.get("unit", ""),
-        "timestamp": payload.get("timestamp") or datetime.now().isoformat(),
+        "timestamp": payload.get("timestamp") or datetime.now(timezone.utc).isoformat(),
         "saved": bool(payload.get("saved", True)),
         "topic": topic,
     }

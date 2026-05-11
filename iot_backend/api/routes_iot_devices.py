@@ -4,12 +4,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import OperationalError
 from iot_backend.database import get_db
 from iot_backend.models import IoTDevice, User, Device, UserDevicePermission
 from iot_backend.api.routes_auth import get_current_user
 from iot_backend import crud
 from iot_backend.services.weather_service import geocode_location
 import re
+import time
 
 router = APIRouter(prefix="/api/iot-devices", tags=["iot-devices"])
 
@@ -25,6 +27,27 @@ def _normalize_source(value: str) -> str:
     if match:
         return f"sensor_{int(match.group(1))}"
     return source
+
+
+def _is_lock_timeout_error(exc: Exception) -> bool:
+    text = str(exc)
+    return "LockNotAvailable" in text or "lock timeout" in text.lower()
+
+
+def _retry_db_query(op, db: Session, attempts: int = 3):
+    last_exc = None
+    for i in range(attempts):
+        try:
+            return op()
+        except OperationalError as exc:
+            db.rollback()
+            if not _is_lock_timeout_error(exc) or i == attempts - 1:
+                last_exc = exc
+                break
+            time.sleep(0.4 * (i + 1))
+    if last_exc:
+        raise last_exc
+    return None
 
 
 # ============== SCHEMAS ==============
@@ -88,7 +111,11 @@ async def create_iot_device(
             )
 
         # Check if source already exists in IoTDevice (user-owned table)
-        existing_iot = db.query(IoTDevice).filter(IoTDevice.source == normalized_source).first()
+        existing_iot = _retry_db_query(
+            lambda: db.query(IoTDevice).filter(IoTDevice.source == normalized_source).first(),
+            db,
+            attempts=3
+        )
         
         if existing_iot:
             raise HTTPException(
@@ -137,7 +164,11 @@ async def create_iot_device(
         
         # Step 2: Check if Device record exists, if not create it
         print(f"[DEBUG] Checking Device for metrics: {normalized_source}")
-        existing_device = db.query(Device).filter(Device.source == normalized_source).first()
+        existing_device = _retry_db_query(
+            lambda: db.query(Device).filter(Device.source == normalized_source).first(),
+            db,
+            attempts=3
+        )
         
         if existing_device:
             # Device already exists (from demo or other user)
@@ -199,6 +230,17 @@ async def create_iot_device(
         }
     except HTTPException:
         raise
+    except OperationalError as e:
+        db.rollback()
+        if _is_lock_timeout_error(e):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database is busy (lock timeout). Please retry in a few seconds."
+            )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create device: {str(e)}"
+        )
     except Exception as e:
         print(f"[ERROR] Failed to create device: {str(e)}")
         import traceback
@@ -216,7 +258,19 @@ async def get_my_iot_devices(
     db: Session = Depends(get_db)
 ):
     """Get all IoT devices owned by current user"""
-    devices = db.query(IoTDevice).filter(IoTDevice.user_id == user.id).all()
+    try:
+        devices = _retry_db_query(
+            lambda: db.query(IoTDevice).filter(IoTDevice.user_id == user.id).all(),
+            db,
+            attempts=3
+        )
+    except OperationalError as e:
+        if _is_lock_timeout_error(e):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database is busy (lock timeout). Please retry in a few seconds."
+            )
+        raise
     
     return {
         "devices": [

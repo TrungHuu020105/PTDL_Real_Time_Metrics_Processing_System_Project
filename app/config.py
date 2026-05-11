@@ -44,6 +44,13 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
 
+def get_cors_origins() -> list[str]:
+    """Return CORS origins from env. Supports comma-separated values."""
+    raw = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+    origins = [item.strip() for item in raw.split(",") if item.strip()]
+    return origins or ["http://localhost:3000"]
+
+
 def get_database_url() -> str:
     """Build PostgreSQL database URL from environment variables."""
     database_url = os.getenv("DATABASE_URL")

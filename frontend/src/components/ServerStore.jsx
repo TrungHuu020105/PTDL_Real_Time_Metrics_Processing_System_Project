@@ -10,6 +10,7 @@ export default function ServerStore() {
   const { user } = useAuth()
   const { notify } = useNotification()
   const { availableServers, myServers, loading } = useDevices()
+  const isDev = import.meta.env.DEV
   const [subscribing, setSubscribing] = useState({})
   const [localhostMetrics, setLocalhostMetrics] = useState({ cpu: null, memory: null })
   const [loadingMetrics, setLoadingMetrics] = useState(false)
@@ -97,20 +98,20 @@ export default function ServerStore() {
   }
 
   useEffect(() => {
-    console.log('[ServerStore] Effect triggered - isAdmin:', isAdmin, 'user:', user)
+    if (isDev) console.log('[ServerStore] Effect triggered - isAdmin:', isAdmin, 'user:', user)
     if (isAdmin) {
-      console.log('[ServerStore] Calling fetchAllServers because isAdmin=true')
+      if (isDev) console.log('[ServerStore] Calling fetchAllServers because isAdmin=true')
       fetchAllServers()
       fetchPendingRequests()
       fetchAllRentals()
       fetchSystemInfo() // Fetch system info when admin view loads
     } else {
-      console.log('[ServerStore] User is not admin, calling fetchUserAvailableServers')
+      if (isDev) console.log('[ServerStore] User is not admin, calling fetchUserAvailableServers')
       fetchUserAvailableServers()
       fetchUserRequests()
       fetchMyRentals()
     }
-  }, [isAdmin, user])
+  }, [isAdmin, user, isDev])
 
   useEffect(() => {
     if (!isAdmin) return
@@ -230,12 +231,12 @@ export default function ServerStore() {
   // ===== ADMIN FUNCTIONS =====
   const fetchAllServers = async () => {
     try {
-      console.log('[ServerStore] isAdmin:', isAdmin)
-      console.log('[ServerStore] Calling /api/servers/admin/servers')
+      if (isDev) console.log('[ServerStore] isAdmin:', isAdmin)
+      if (isDev) console.log('[ServerStore] Calling /api/servers/admin/servers')
       const response = await api.get('/api/servers/admin/servers')
-      console.log('[ServerStore] Full response:', response)
-      console.log('[ServerStore] Fetched all servers for admin:', response.data.servers)
-      console.log('[ServerStore] Servers length:', response.data.servers?.length)
+      if (isDev) console.log('[ServerStore] Full response:', response)
+      if (isDev) console.log('[ServerStore] Fetched all servers for admin:', response.data.servers)
+      if (isDev) console.log('[ServerStore] Servers length:', response.data.servers?.length)
       setAllServers(response.data.servers || [])
     } catch (err) {
       console.error('[ServerStore] Failed to fetch servers - Error:', err)
@@ -247,7 +248,7 @@ export default function ServerStore() {
   const fetchUserAvailableServers = async () => {
     try {
       const response = await api.get('/api/servers')
-      console.log('[ServerStore] Fetched available servers for user:', response.data.servers)
+      if (isDev) console.log('[ServerStore] Fetched available servers for user:', response.data.servers)
       // Store in a separate state for user view
       if (!isAdmin) {
         setAllServers(response.data.servers || [])
@@ -326,7 +327,7 @@ export default function ServerStore() {
     try {
       setUpdatingServer(serverId)
       await api.put(`/api/servers/admin/servers/${serverId}/price`, null, {
-        params: { price_per_hour: parseFloat(newPrice) }
+        params: { price_per_month: parseFloat(newPrice) }
       })
       await fetchAllServers()
       setEditingPrice(prev => {
@@ -421,7 +422,7 @@ export default function ServerStore() {
       await api.patch(`/api/servers/admin/servers/${selectedServerForEdit.id}`, {
         name: editFormData.name,
         specs: editFormData.specs,
-        price_per_hour: pricePerMonth
+        price_per_month: pricePerMonth
       })
       await fetchAllServers()
       notify('Server metadata updated successfully.')
@@ -727,8 +728,36 @@ export default function ServerStore() {
     return colors[index % colors.length]
   }
 
+  const SERVER_COLOR_STYLES = {
+    'neon-cyan': {
+      border: 'border-neon-cyan/30 hover:border-neon-cyan/60',
+      title: 'text-neon-cyan',
+      statusText: 'text-neon-cyan',
+      button: 'bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40 hover:border-neon-cyan',
+    },
+    'neon-green': {
+      border: 'border-neon-green/30 hover:border-neon-green/60',
+      title: 'text-neon-green',
+      statusText: 'text-neon-green',
+      button: 'bg-neon-green/20 text-neon-green border border-neon-green/40 hover:border-neon-green',
+    },
+    'neon-purple': {
+      border: 'border-neon-purple/30 hover:border-neon-purple/60',
+      title: 'text-neon-purple',
+      statusText: 'text-neon-purple',
+      button: 'bg-neon-purple/20 text-neon-purple border border-neon-purple/40 hover:border-neon-purple',
+    },
+    'neon-orange': {
+      border: 'border-neon-orange/30 hover:border-neon-orange/60',
+      title: 'text-neon-orange',
+      statusText: 'text-neon-orange',
+      button: 'bg-neon-orange/20 text-neon-orange border border-neon-orange/40 hover:border-neon-orange',
+    },
+  }
+
   const ServerCard = ({ server, index }) => {
     const color = getServerColor(index)
+    const colorStyle = SERVER_COLOR_STYLES[color] || SERVER_COLOR_STYLES['neon-cyan']
     const subscribed = isSubscribed(server.id)
     const request = getRequestStatus(server.id)
     const rental = getRentalByServer(server.server_id || server.id)
@@ -775,13 +804,13 @@ export default function ServerStore() {
             fetchServerChart(server.server_id || server.id, server.name)
           }
         }}
-        className={`bg-dark-800 border border-${color}/30 rounded-xl p-6 hover:border-${color}/60 transition-all flex flex-col ${canOpenStatusChart ? 'cursor-pointer hover:bg-dark-700' : ''}`}
+        className={`bg-dark-800 border rounded-xl p-6 transition-all flex flex-col ${colorStyle.border} ${canOpenStatusChart ? 'cursor-pointer hover:bg-dark-700' : ''}`}
       >
         {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <div>
             <div className="flex items-center gap-3 mb-2">
-              <h3 className={`text-xl font-bold text-${color}`}>{server.name}</h3>
+              <h3 className={`text-xl font-bold ${colorStyle.title}`}>{server.name}</h3>
             </div>
             {canSeeIp && server.ip && (
               <p className="text-xs text-gray-500 mb-2">IP: {server.ip}</p>
@@ -861,7 +890,7 @@ export default function ServerStore() {
           ) : (
             <div className="mb-4">
               <p className="text-sm text-gray-500 mb-1">Status</p>
-              <p className={`text-lg font-bold text-${color}`}>Free to Monitor</p>
+              <p className={`text-lg font-bold ${colorStyle.statusText}`}>Free to Monitor</p>
             </div>
           )}
 
@@ -878,8 +907,8 @@ export default function ServerStore() {
                 : buttonState.status === 'pending'
                 ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/40 cursor-not-allowed'
                 : buttonState.status === 'rejected'
-                ? `bg-${color}/20 text-${color} border border-${color}/40 hover:border-${color}`
-                : `bg-${color}/20 text-${color} border border-${color}/40 hover:border-${color} disabled:opacity-50`
+                ? colorStyle.button
+                : `${colorStyle.button} disabled:opacity-50`
             }`}
           >
             <ButtonIcon className="w-5 h-5" />
@@ -964,10 +993,10 @@ export default function ServerStore() {
         // Both admin and user use allServers now (admin from /api/servers/admin/servers, user from /api/servers)
         const serversToCheck = allServers
         
-        console.log(`[ServerStore] Fetching metrics for ${isAdmin ? 'admin' : 'user'} - servers count:`, serversToCheck.length, 'servers:', serversToCheck)
+        if (isDev) console.log(`[ServerStore] Fetching metrics for ${isAdmin ? 'admin' : 'user'} - servers count:`, serversToCheck.length, 'servers:', serversToCheck)
         
         if (serversToCheck.length === 0) {
-          console.log('[ServerStore] No servers to check, setting empty metrics')
+          if (isDev) console.log('[ServerStore] No servers to check, setting empty metrics')
           setAdminServerMetrics({})
           return
         }
@@ -982,10 +1011,10 @@ export default function ServerStore() {
 
         if (isMounted) {
           const metricsObj = Object.fromEntries(metricEntries)
-          console.log('[ServerStore] Metrics fetched:', metricsObj)
-          console.log('[ServerStore] Server 1 metrics:', metricsObj[1])
-          console.log('[ServerStore] Server 2 metrics:', metricsObj[2])
-          console.log('[ServerStore] Server 3 metrics:', metricsObj[3])
+          if (isDev) console.log('[ServerStore] Metrics fetched:', metricsObj)
+          if (isDev) console.log('[ServerStore] Server 1 metrics:', metricsObj[1])
+          if (isDev) console.log('[ServerStore] Server 2 metrics:', metricsObj[2])
+          if (isDev) console.log('[ServerStore] Server 3 metrics:', metricsObj[3])
           setAdminServerMetrics(metricsObj)
         }
       } catch (err) {
@@ -1004,7 +1033,7 @@ export default function ServerStore() {
 
   // Separate effect to trigger metrics fetch when component first mounts
   useEffect(() => {
-    console.log('[ServerStore] Component mounted, isAdmin:', isAdmin)
+    if (isDev) console.log('[ServerStore] Component mounted, isAdmin:', isAdmin)
   }, [])
 
   const handleLocalhostEdit = async (e) => {

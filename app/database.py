@@ -1,5 +1,6 @@
 """Database configuration and session management (PostgreSQL)."""
 
+import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 from app.config import get_database_url
@@ -10,6 +11,13 @@ DATABASE_URL = get_database_url()
 engine_kwargs = {
     "echo": False,  # Set to True for SQL query debugging
     "pool_pre_ping": True,
+    # Avoid hanging forever when network/db has intermittent issues.
+    "connect_args": {
+        "connect_timeout": 5,
+        # Postgres session-level timeouts to fail fast on DDL locks.
+        # Keep statement timeout for safety, but relax lock timeout to reduce transient lock errors.
+        "options": "-c statement_timeout=15000 -c lock_timeout=15000",
+    },
 }
 
 # Create engine
@@ -34,6 +42,20 @@ def get_db():
 def init_db():
     """Initialize database tables"""
     Base.metadata.create_all(bind=engine)
+    if _is_schema_auto_migrate_enabled():
+        _run_schema_evolution()
+
+
+def _is_schema_auto_migrate_enabled() -> bool:
+    """
+    Guard risky runtime DDL behind an explicit flag.
+    Default OFF to avoid startup hangs from table locks.
+    """
+    return os.getenv("DB_AUTO_SCHEMA_MIGRATION", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _run_schema_evolution():
+    """Best-effort runtime schema evolution (explicitly enabled only)."""
     _ensure_iot_device_columns()
     _cleanup_metric_columns()
 
@@ -41,14 +63,14 @@ def init_db():
 def _ensure_iot_device_columns():
     """Best-effort schema evolution for existing iot_devices table."""
     alter_statements = [
-        "ALTER TABLE iot_devices ADD COLUMN environment_type VARCHAR(20) DEFAULT 'indoor'",
-        "ALTER TABLE iot_devices ADD COLUMN location_query VARCHAR(255)",
-        "ALTER TABLE iot_devices ADD COLUMN latitude FLOAT",
-        "ALTER TABLE iot_devices ADD COLUMN longitude FLOAT",
-        "ALTER TABLE iot_devices ADD COLUMN timezone_name VARCHAR(64)",
-        "ALTER TABLE iot_devices ADD COLUMN task_description VARCHAR(500)",
-        "ALTER TABLE iot_devices ADD COLUMN priority_level VARCHAR(20)",
-        "ALTER TABLE iot_devices ADD COLUMN action_hint VARCHAR(500)",
+        "ALTER TABLE iot_devices ADD COLUMN IF NOT EXISTS environment_type VARCHAR(20) DEFAULT 'indoor'",
+        "ALTER TABLE iot_devices ADD COLUMN IF NOT EXISTS location_query VARCHAR(255)",
+        "ALTER TABLE iot_devices ADD COLUMN IF NOT EXISTS latitude FLOAT",
+        "ALTER TABLE iot_devices ADD COLUMN IF NOT EXISTS longitude FLOAT",
+        "ALTER TABLE iot_devices ADD COLUMN IF NOT EXISTS timezone_name VARCHAR(64)",
+        "ALTER TABLE iot_devices ADD COLUMN IF NOT EXISTS task_description VARCHAR(500)",
+        "ALTER TABLE iot_devices ADD COLUMN IF NOT EXISTS priority_level VARCHAR(20)",
+        "ALTER TABLE iot_devices ADD COLUMN IF NOT EXISTS action_hint VARCHAR(500)",
     ]
 
     with engine.begin() as conn:
@@ -63,7 +85,7 @@ def _ensure_iot_device_columns():
 def _cleanup_metric_columns():
     """Best-effort cleanup for metrics table schema."""
     alter_statements = [
-        "ALTER TABLE metrics DROP COLUMN timezone_name",
+        "ALTER TABLE metrics DROP COLUMN IF EXISTS timezone_name",
     ]
     with engine.begin() as conn:
         for sql in alter_statements:

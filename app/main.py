@@ -1,8 +1,10 @@
 """FastAPI application entry point"""
 
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, SessionLocal
+from app.config import get_cors_origins
 from app.api import routes_auth, routes_admin, routes_servers, routes_chat
 from app.crud import get_user_by_username, create_user
 from app.schemas import UserRegister
@@ -21,7 +23,7 @@ app = FastAPI(
 # Add CORS middleware for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify allowed origins
+    allow_origins=get_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,6 +50,8 @@ async def root():
 @app.on_event("startup")
 async def startup_event():
     """Initialize on server startup"""
+    if str(os.getenv("ENABLE_DEMO_USERS", "false")).lower() != "true":
+        return
     db = SessionLocal()
     try:
         # Create demo users if they don't exist

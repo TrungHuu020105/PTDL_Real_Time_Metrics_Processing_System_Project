@@ -6,6 +6,7 @@ const DeviceContext = createContext()
 
 export function DeviceProvider({ children }) {
   const { user, token } = useAuth()
+  const isDev = import.meta.env.DEV
   
   // IoT Devices (user-owned)
   const [iotDevices, setIotDevices] = useState([])
@@ -26,18 +27,18 @@ export function DeviceProvider({ children }) {
   // Fetch IoT devices on mount
   useEffect(() => {
     if (user && token) {
-      console.log('DeviceContext: User loaded, role:', user.role)
+      if (isDev) console.log('DeviceContext: User loaded, role:', user.role)
       if (user.role === 'admin') {
-        console.log('User is admin, fetching ALL devices...')
+        if (isDev) console.log('User is admin, fetching ALL devices...')
         fetchAllIoTDevices()
       } else {
-        console.log('User is regular user, fetching MY devices...')
+        if (isDev) console.log('User is regular user, fetching MY devices...')
         fetchIoTDevices()
       }
       fetchMyServers()
       fetchAvailableServers()
     }
-  }, [user, token])
+  }, [user, token, isDev])
 
   // ============== IoT DEVICES ==============
   
@@ -95,12 +96,12 @@ export function DeviceProvider({ children }) {
   const fetchAllIoTDevices = async () => {
     try {
       setLoading(true)
-      console.log('Fetching ALL IoT devices for admin...')
+      if (isDev) console.log('Fetching ALL IoT devices for admin...')
       const response = await api.get('/api/admin/iot-devices')
-      console.log('API Response:', response.data)
+      if (isDev) console.log('API Response:', response.data)
       // Should return { devices: [...], count: X }
       setAllIoTDevices(response.data.devices || [])
-      console.log('AllIoTDevices updated:', response.data.devices)
+      if (isDev) console.log('AllIoTDevices updated:', response.data.devices)
     } catch (err) {
       console.error('Failed to fetch all IoT devices:', err)
       setError(err.message)
@@ -149,7 +150,7 @@ export function DeviceProvider({ children }) {
   const fetchAvailableServers = async () => {
     try {
       const response = await api.get('/api/servers')
-      console.log('[DeviceContext] Fetched available servers:', response.data?.servers)
+      if (isDev) console.log('[DeviceContext] Fetched available servers:', response.data?.servers)
       setAvailableServers(response?.data?.servers || [])
     } catch (err) {
       console.error('Failed to fetch available servers:', err)

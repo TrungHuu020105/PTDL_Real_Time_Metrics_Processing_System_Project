@@ -56,6 +56,7 @@ export default function IoTDeviceManager() {
     if (isDev) console.log('IoTDeviceManager devices:', displayDevices?.length || 0)
   }, [isDev, displayDevices?.length])
   const wsRef = useRef(null)
+  const devicesRef = useRef([])
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showAddDeviceModal, setShowAddDeviceModal] = useState(false)
   const [showChartModal, setShowChartModal] = useState(false)
@@ -121,8 +122,13 @@ export default function IoTDeviceManager() {
   const [newEmail, setNewEmail] = useState('')
   const [settingsLoading, setSettingsLoading] = useState(false)
   const latestMetricsInFlightRef = useRef(false)
+  const historyEndpointSupportedRef = useRef(true)
   const getMetricValue = (m) => m?.metric_value ?? m?.value
   const getMetricTimestamp = (m) => m?.event_ts ?? m?.timestamp
+
+  useEffect(() => {
+    devicesRef.current = displayDevices || []
+  }, [displayDevices])
 
   useEffect(() => {
     const closeSettingsMenu = () => setOpenSettingsMenuId(null)
@@ -183,34 +189,54 @@ export default function IoTDeviceManager() {
       try {
         latestMetricsInFlightRef.current = true
         const metrics = {}
-        for (const device of displayDevices) {
+        const devices = devicesRef.current || []
+        for (const device of devices) {
           try {
-            // Fetch history with very recent timeframe to get latest value
-            const response = await api.get('/api/metrics/history', {
-              params: {
-                metric_type: device.device_type,
-                source: device.source,
-                minutes: 5
-              }
-            })
-            
-            // Get the latest value from the returned data
-            if (response.data.data && response.data.data.length > 0) {
-              // Sort by timestamp descending and get the first (most recent)
-              const latest = response.data.data.sort((a, b) => 
-                new Date(getMetricTimestamp(b)) - new Date(getMetricTimestamp(a))
-              )[0]
-              
-              metrics[device.id] = {
-                value: getMetricValue(latest),
-                timestamp: getMetricTimestamp(latest)
-              }
-            } else {
-              metrics[device.id] = {
-                value: null,
-                timestamp: null
+            // Preferred: history endpoint (richer data). Fallback: latest endpoint.
+            let value = null
+            let timestamp = null
+            if (historyEndpointSupportedRef.current) {
+              try {
+                const response = await api.get('/api/metrics/history', {
+                  params: {
+                    metric_type: device.device_type,
+                    source: device.source,
+                    minutes: 5
+                  }
+                })
+                if (response.data.data && response.data.data.length > 0) {
+                  const latest = response.data.data.sort(
+                    (a, b) => new Date(getMetricTimestamp(b)) - new Date(getMetricTimestamp(a))
+                  )[0]
+                  value = getMetricValue(latest)
+                  timestamp = getMetricTimestamp(latest)
+                }
+              } catch (historyErr) {
+                // Some deployed IoT backends don't expose /api/metrics/history yet.
+                if (historyErr?.response?.status === 404) {
+                  historyEndpointSupportedRef.current = false
+                } else {
+                  throw historyErr
+                }
               }
             }
+
+            if (!historyEndpointSupportedRef.current) {
+              const latestRes = await api.get('/api/metrics/latest', {
+                params: { source: device.source }
+              })
+              const latestData = latestRes?.data || {}
+              const byTypeMap = {
+                temperature: latestData.latest_temperature,
+                humidity: latestData.latest_humidity,
+                soil_moisture: latestData.latest_soil_moisture,
+                light_intensity: latestData.latest_light_intensity,
+                pressure: latestData.latest_pressure,
+              }
+              value = byTypeMap[device.device_type] ?? null
+              timestamp = latestData.timestamp || null
+            }
+            metrics[device.id] = { value, timestamp }
           } catch (err) {
             console.error(`Failed to fetch latest metric for device ${device.id}:`, err)
             metrics[device.id] = {
@@ -261,7 +287,7 @@ export default function IoTDeviceManager() {
               setLatestMetrics(prev => {
                 const updated = { ...prev }
                 // Find device by type and update it
-                displayDevices.forEach(device => {
+                ;(devicesRef.current || []).forEach(device => {
                   if (device.device_type === message.metric_type) {
                     updated[device.id] = {
                       value: message.value,
@@ -300,7 +326,7 @@ export default function IoTDeviceManager() {
         wsRef.current.close()
       }
     }
-  }, [displayDevices, isDev])
+  }, [isDev])
 
   // Helper function to aggregate data by minute (1 point per minute)
   const aggregateDataByMinute = (rawData) => {
@@ -338,26 +364,62 @@ export default function IoTDeviceManager() {
     return aggregatedData
   }
 
+  const fetchDeviceHistoryData = async (device, minutes = 120) => {
+    if (historyEndpointSupportedRef.current) {
+      try {
+        const response = await api.get('/api/metrics/history', {
+          params: {
+            metric_type: device.device_type,
+            source: device.source,
+            minutes
+          }
+        })
+        return response.data?.data || []
+      } catch (err) {
+        if (err?.response?.status === 404) {
+          historyEndpointSupportedRef.current = false
+        } else {
+          throw err
+        }
+      }
+    }
+
+    const latestRes = await api.get('/api/metrics/latest', {
+      params: { source: device.source }
+    })
+    const latestData = latestRes?.data || {}
+    const byTypeMap = {
+      temperature: latestData.latest_temperature,
+      humidity: latestData.latest_humidity,
+      soil_moisture: latestData.latest_soil_moisture,
+      light_intensity: latestData.latest_light_intensity,
+      pressure: latestData.latest_pressure,
+    }
+    const value = byTypeMap[device.device_type]
+    if (value === null || value === undefined) return []
+
+    return [{
+      value,
+      timestamp: latestData.timestamp || new Date().toISOString(),
+      source: device.source,
+      metric_type: device.device_type,
+    }]
+  }
+
   // Fetch chart data for selected device (past 2 hours = 120 minutes)
   const handleOpenChart = async (device) => {
     setSelectedDeviceForChart(device)
     setShowChartModal(true)
     setChartLoading(true)
     try {
-      const response = await api.get('/api/metrics/history', {
-        params: {
-          metric_type: device.device_type,
-          source: device.source,
-          minutes: 120 // 2 hours
-        }
-      })
+      const rawData = await fetchDeviceHistoryData(device, 120)
       
       // Aggregate data by minute (1 point per minute)
-      const formattedData = aggregateDataByMinute(response.data.data)
+      const formattedData = aggregateDataByMinute(rawData)
       
       // Calculate statistics from original data (not aggregated)
-      if (response.data.data && response.data.data.length > 0) {
-        const values = response.data.data.map(d => getMetricValue(d))
+      if (rawData && rawData.length > 0) {
+        const values = rawData.map(d => getMetricValue(d))
         const average = values.reduce((a, b) => a + b, 0) / values.length
         const min = Math.min(...values)
         const max = Math.max(...values)
@@ -387,20 +449,14 @@ export default function IoTDeviceManager() {
     const refreshChartData = async () => {
       try {
         if (isDev) console.log('Refreshing chart data for device:', selectedDeviceForChart.device_type)
-        const response = await api.get('/api/metrics/history', {
-          params: {
-            metric_type: selectedDeviceForChart.device_type,
-            source: selectedDeviceForChart.source,
-            minutes: 120 // 2 hours
-          }
-        })
+        const rawData = await fetchDeviceHistoryData(selectedDeviceForChart, 120)
         
         // Aggregate data by minute (1 point per minute)
-        const formattedData = aggregateDataByMinute(response.data.data)
+        const formattedData = aggregateDataByMinute(rawData)
         
         // Calculate statistics from original data (not aggregated)
-        if (response.data.data && response.data.data.length > 0) {
-          const values = response.data.data.map(d => getMetricValue(d))
+        if (rawData && rawData.length > 0) {
+          const values = rawData.map(d => getMetricValue(d))
           const average = values.reduce((a, b) => a + b, 0) / values.length
           const min = Math.min(...values)
           const max = Math.max(...values)
@@ -825,17 +881,20 @@ export default function IoTDeviceManager() {
   // Check if alert is triggered for a device
   const checkAlertTriggered = (device) => {
     const latestValue = latestMetrics[device.id]?.value
-    if (isDev) console.log(`[checkAlertTriggered] Device: ${device.name}, latestValue: ${latestValue}, alert_enabled: ${device.alert_enabled}`)
-    if (isDev) console.log(`[checkAlertTriggered] Thresholds - Lower: ${device.lower_threshold}, Upper: ${device.upper_threshold}`)
     
     // If no value, no alert
-    if (!latestValue) return { triggered: false, status: null }
+    if (latestValue === null || latestValue === undefined) return { triggered: false, status: null }
 
     // Check if thresholds are set (either alert_enabled=true OR thresholds exist)
     const hasThresholds = (device.lower_threshold !== null && device.lower_threshold !== undefined) ||
                           (device.upper_threshold !== null && device.upper_threshold !== undefined)
     
     if (!hasThresholds) return { triggered: false, status: null }
+
+    if (isDev) {
+      console.log(`[checkAlertTriggered] Device: ${device.name}, latestValue: ${latestValue}`)
+      console.log(`[checkAlertTriggered] Thresholds - Lower: ${device.lower_threshold}, Upper: ${device.upper_threshold}`)
+    }
 
     const lowerThreshold = device.lower_threshold
     const upperThreshold = device.upper_threshold

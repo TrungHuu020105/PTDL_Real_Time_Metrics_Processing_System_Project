@@ -49,6 +49,21 @@ GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
+# MQTT configuration
+MQTT_HOST = os.getenv("MQTT_HOST", "127.0.0.1")
+MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
+MQTT_USERNAME = os.getenv("MQTT_USERNAME", "")
+MQTT_PASSWORD = os.getenv("MQTT_PASSWORD", "")
+MQTT_CLIENT_ID = os.getenv("MQTT_CLIENT_ID", "iot-backend")
+MQTT_SENSOR_TOPIC = os.getenv("MQTT_SENSOR_TOPIC", os.getenv("MQTT_TOPIC", "sensors/+/data"))
+MQTT_COMMAND_TOPIC_PREFIX = os.getenv("MQTT_COMMAND_TOPIC_PREFIX", "ptdl/devices")
+
+# Device automation thresholds
+FAN_ON_TEMP = float(os.getenv("FAN_ON_TEMP", "32"))
+LAMP_ON_TEMP = float(os.getenv("LAMP_ON_TEMP", "25"))
+FOG_ON_HUMIDITY = float(os.getenv("FOG_ON_HUMIDITY", "60"))
+FOG_OFF_HUMIDITY = float(os.getenv("FOG_OFF_HUMIDITY", "75"))
+
 
 def get_cors_origins() -> list[str]:
     """Return CORS origins from env. Supports comma-separated values."""

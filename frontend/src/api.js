@@ -43,14 +43,18 @@ if (import.meta.env.DEV) {
 api.interceptors.response.use(
     response => response,
     error => {
-        if (error.response?.status === 404) {
+        const url = error.config?.url || ''
+        const isKnownOptionalHistory = url.startsWith('/api/metrics/history')
+        if (error.response?.status === 404 && !isKnownOptionalHistory) {
             console.error('Endpoint not found:', error.config.url)
         }
-        console.error('[API] Error:', {
-            message: error.message,
-            code: error.code,
-            url: error.config?.url
-        })
+        if (!isKnownOptionalHistory) {
+            console.error('[API] Error:', {
+                message: error.message,
+                code: error.code,
+                url: error.config?.url
+            })
+        }
         return Promise.reject(error)
     }
 )

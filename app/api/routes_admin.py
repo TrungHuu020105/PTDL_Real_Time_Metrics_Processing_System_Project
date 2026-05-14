@@ -140,9 +140,25 @@ async def create_device(device: DeviceCreate, admin: User = Depends(verify_admin
 async def get_all_devices(admin: User = Depends(verify_admin), db: Session = Depends(get_db)):
     """Get all devices"""
     devices = crud.get_all_devices(db)
+    payload = []
+    for d in devices:
+        users = crud.get_device_users(db, d.id)
+        payload.append(
+            {
+                "id": d.id,
+                "name": d.name,
+                "device_type": d.device_type,
+                "source": d.source,
+                "location": d.location,
+                "is_active": d.is_active,
+                "created_by": d.created_by,
+                "created_at": d.created_at,
+                "users": [{"id": u.id, "username": u.username, "email": u.email} for u in users],
+            }
+        )
     return {
-        "devices": devices,
-        "count": len(devices)
+        "devices": payload,
+        "count": len(payload)
     }
 
 
@@ -298,4 +314,3 @@ async def get_device_users(device_id: int, admin: User = Depends(verify_admin), 
         ],
         "count": len(users)
     }
-

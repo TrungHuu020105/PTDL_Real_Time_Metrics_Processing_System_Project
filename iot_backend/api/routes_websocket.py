@@ -136,7 +136,12 @@ def _check_and_trigger_alert(db, metric_type: str, source: str, value: float, me
         loop = asyncio.get_running_loop()
         loop.create_task(dispatch_alert_notifications(alert.id))
     except RuntimeError:
-        pass
+        # Called from non-async thread (e.g., MQTT callback thread).
+        # Run notification dispatch directly so alerts are still delivered.
+        try:
+            asyncio.run(dispatch_alert_notifications(alert.id))
+        except Exception as dispatch_exc:
+            print(f"[NOTIFY] Dispatch failed for alert_id={alert.id}: {dispatch_exc}")
 
 
 def save_iot_metric_to_db(

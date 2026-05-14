@@ -6,8 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from iot_backend.config import get_cors_origins
-from iot_backend.database import init_db, SessionLocal
-from iot_backend.models import Metric
+from iot_backend.database import init_db
 from iot_backend.api import (
     routes_auth,
     routes_iot_devices,
@@ -17,6 +16,7 @@ from iot_backend.api import (
     routes_admin_iot,
     routes_devices,
 )
+from iot_backend.api.routes_websocket import save_iot_metric_to_db
 from iot_backend import mqtt_service
 from iot_backend.state import runtime_state
 from iot_backend.websocket_manager import manager
@@ -78,60 +78,51 @@ async def shutdown_event():
 
 def handle_mqtt_reading(reading: dict):
     """Handle both legacy metric payload and new temp/humidity payload."""
-    db = SessionLocal()
+    sensor_id = reading.get("sensor_id", "esp32_devkit_v1")
+    location = reading.get("location") or "Unknown"
+    now_iso = datetime.now(VIETNAM_TZ).isoformat()
+
+    metric_type = reading.get("metric_type")
+    metric_value = reading.get("value")
+    temp = reading.get("temperature")
+    humidity = reading.get("humidity")
+
     try:
-        sensor_id = reading.get("sensor_id", "esp32_devkit_v1")
-        location = reading.get("location") or "Unknown"
-        now = datetime.now(VIETNAM_TZ)
-
-        metric_type = reading.get("metric_type")
-        metric_value = reading.get("value")
-        temp = reading.get("temperature")
-        humidity = reading.get("humidity")
-
         if metric_type is not None and metric_value is not None:
-            db.add(
-                Metric(
-                    event_ts=now,
-                    sensor_id=sensor_id,
-                    location=location,
-                    metric_type=str(metric_type),
-                    metric_value=float(metric_value),
-                    unit=reading.get("unit") or "",
-                )
+            save_iot_metric_to_db(
+                metric_type=str(metric_type),
+                source=str(sensor_id),
+                location=location,
+                timestamp=reading.get("timestamp") or now_iso,
+                value=float(metric_value),
+                unit=str(reading.get("unit") or ""),
+                save_flag=bool(reading.get("saved", True)),
             )
         else:
             if temp is not None:
-                db.add(
-                    Metric(
-                        event_ts=now,
-                        sensor_id=sensor_id,
-                        location=location,
-                        metric_type="temperature",
-                        metric_value=float(temp),
-                        unit="°C",
-                    )
+                save_iot_metric_to_db(
+                    metric_type="temperature",
+                    source=str(sensor_id),
+                    location=location,
+                    timestamp=reading.get("timestamp") or now_iso,
+                    value=float(temp),
+                    unit="degC",
+                    save_flag=True,
                 )
             if humidity is not None:
-                db.add(
-                    Metric(
-                        event_ts=now,
-                        sensor_id=sensor_id,
-                        location=location,
-                        metric_type="humidity",
-                        metric_value=float(humidity),
-                        unit="%",
-                    )
+                save_iot_metric_to_db(
+                    metric_type="humidity",
+                    source=str(sensor_id),
+                    location=location,
+                    timestamp=reading.get("timestamp") or now_iso,
+                    value=float(humidity),
+                    unit="%",
+                    save_flag=True,
                 )
             if temp is not None and humidity is not None:
                 runtime_state.apply_auto(float(temp), float(humidity))
-
-        db.commit()
     except Exception as exc:
-        db.rollback()
-        print(f"[SENSOR] Failed to save metrics: {exc}")
-    finally:
-        db.close()
+        print(f"[SENSOR] Failed to save metrics/alerts: {exc}")
 
     response = runtime_state.response()
     try:

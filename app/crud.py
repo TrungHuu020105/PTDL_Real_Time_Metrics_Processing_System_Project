@@ -832,8 +832,12 @@ def list_user_chat_conversations(db: Session, user_id: int) -> List[ChatConversa
 
 
 def list_admin_chat_conversations(db: Session, status_filter: Optional[str] = None) -> List[ChatConversation]:
-    query = db.query(ChatConversation)
-    if status_filter and status_filter != "all":
+    # Admin inbox only shows conversations explicitly handed off to admin.
+    # Exclude bot-only threads and closed conversations from admin list.
+    query = db.query(ChatConversation).filter(
+        ChatConversation.status.in_(["waiting_admin", "in_progress"])
+    )
+    if status_filter and status_filter not in {"all", "closed", "bot_active"}:
         query = query.filter(ChatConversation.status == status_filter)
     return query.order_by(ChatConversation.updated_at.desc()).all()
 

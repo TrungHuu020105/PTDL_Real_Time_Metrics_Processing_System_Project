@@ -25,6 +25,11 @@ export default function IoTDeviceManager() {
     total_devices: 0,
     total_users: 0
   })
+
+  // Admin table must show normal users only (hide admin accounts).
+  const userOnlySummary = (adminSummary?.users_summary || []).filter(
+    (item) => item?.role === 'user' || (!item?.role && item?.username !== 'admin' && item?.email !== 'admin@example.com')
+  )
   
   // ADMIN: Fetch admin summary data
   useEffect(() => {
@@ -935,7 +940,7 @@ export default function IoTDeviceManager() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-700">
-                {adminSummary?.users_summary?.map((item) => (
+                {userOnlySummary.map((item) => (
                   <tr key={item.user_id} className="hover:bg-slate-700/50 transition">
                     <td className="px-6 py-3 text-white font-medium">{item.username}</td>
                     <td className="px-6 py-3 text-gray-400">{item.email}</td>
@@ -948,7 +953,7 @@ export default function IoTDeviceManager() {
                 ))}
               </tbody>
             </table>
-            {!adminSummary?.users_summary || adminSummary.users_summary.length === 0 && (
+            {userOnlySummary.length === 0 && (
               <div className="text-center py-8 text-gray-400">No users with devices</div>
             )}
           </div>
@@ -960,7 +965,7 @@ export default function IoTDeviceManager() {
             </div>
             <div className="p-4 bg-slate-700/50 rounded-lg">
               <p className="text-gray-300 text-sm">Total Users</p>
-              <p className="text-cyan-400 font-bold text-2xl">{adminSummary?.total_users || 0}</p>
+              <p className="text-cyan-400 font-bold text-2xl">{userOnlySummary.length}</p>
             </div>
           </div>
         </>

@@ -262,6 +262,12 @@ export default function AdminPanel() {
                   <p className="text-xs text-gray-500">
                     Source: <code className="font-mono">{device.source}</code>
                   </p>
+                  <p className="text-xs text-gray-500">
+                    User:{' '}
+                    {device.users && device.users.length > 0
+                      ? device.users.map((u) => u.username || u.email).join(', ')
+                      : 'No user assigned'}
+                  </p>
                   {device.location && (
                     <p className="text-xs text-gray-500">Location: {device.location}</p>
                   )}

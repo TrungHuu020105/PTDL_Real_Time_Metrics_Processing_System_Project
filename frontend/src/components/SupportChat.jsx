@@ -53,8 +53,12 @@ export default function SupportChat() {
       const res = await api.get(endpoint)
       const rows = res.data?.conversations || []
       setConversations(rows)
-      if (!selectedConversationId && rows.length > 0) {
-        setSelectedConversationId(rows[0].id)
+      const hasCurrentSelection = selectedConversationId && rows.some((c) => c.id === selectedConversationId)
+      if (!hasCurrentSelection) {
+        setSelectedConversationId(rows.length > 0 ? rows[0].id : null)
+        if (rows.length === 0) {
+          setMessages([])
+        }
       }
     } catch (err) {
       console.error('Failed to load conversations:', err)
@@ -324,11 +328,9 @@ export default function SupportChat() {
               onChange={(e) => setStatusFilter(e.target.value)}
               className="bg-dark-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-neon-cyan outline-none"
             >
-              <option value="all">All status</option>
+              <option value="all">All escalated</option>
               <option value="waiting_admin">Waiting admin</option>
               <option value="in_progress">In progress</option>
-              <option value="closed">Closed</option>
-              <option value="bot_active">Bot active</option>
             </select>
           </div>
         )}

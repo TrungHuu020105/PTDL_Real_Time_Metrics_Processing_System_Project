@@ -697,7 +697,7 @@ export default function IoTDeviceManager() {
       
       const response = await api.put(`/api/iot-devices/${selectedDeviceForAlert.id}/alert-thresholds`, thresholdData)
       if (isDev) console.log('Response received:', response.data)
-      notify('âœ… ' + response.data.message)
+      notify('✅ ' + response.data.message)
       setShowAlertThresholdsModal(false)
       
       // Refresh ALL devices to get updated threshold values
@@ -805,7 +805,7 @@ export default function IoTDeviceManager() {
 
   const getMetricUnit = (type) => {
     const units = {
-      temperature: 'Â°C',
+      temperature: '°C',
       humidity: '%',
       soil_moisture: '%',
       light_intensity: 'lux',
@@ -1110,7 +1110,7 @@ export default function IoTDeviceManager() {
                       </div>
                       {alertStatus.triggered && (
                         <div className="flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold bg-red-500/30 text-red-400">
-                          ðŸš¨ OUT OF RANGE
+                          🚨 OUT OF RANGE
                         </div>
                       )}
                     </div>
@@ -1125,7 +1125,7 @@ export default function IoTDeviceManager() {
                               ? 'bg-red-500/20 border-red-500/60'
                               : 'bg-blue-500/10 border-blue-500/30'
                           }`}>
-                            <p className="text-xs text-blue-400/70 font-semibold">â¬‡ï¸ Min</p>
+                            <p className="text-xs text-blue-400/70 font-semibold">⬇️ Min</p>
                             <p className="text-sm font-mono text-blue-300">{
                               typeof device.lower_threshold === 'number' 
                                 ? device.lower_threshold.toFixed(1) 
@@ -1139,7 +1139,7 @@ export default function IoTDeviceManager() {
                               ? 'bg-red-500/20 border-red-500/60'
                               : 'bg-green-500/10 border-green-500/30'
                           }`}>
-                            <p className="text-xs text-green-400/70 font-semibold">â¬†ï¸ Max</p>
+                            <p className="text-xs text-green-400/70 font-semibold">⬆️ Max</p>
                             <p className="text-sm font-mono text-green-300">{
                               typeof device.upper_threshold === 'number' 
                                 ? device.upper_threshold.toFixed(1) 
@@ -1277,11 +1277,11 @@ export default function IoTDeviceManager() {
                   onChange={(e) => setFormData({...formData, device_type: e.target.value})}
                   className="w-full bg-dark-900 border border-gray-700 rounded-lg px-4 py-2 text-white focus:border-neon-cyan outline-none"
                 >
-                  <option value="temperature">ðŸŒ¡ï¸  Temperature</option>
-                  <option value="humidity">ðŸ’§ Humidity</option>
-                  <option value="soil_moisture">ðŸŒ± Soil Moisture</option>
-                  <option value="light_intensity">â˜€ï¸  Light Intensity</option>
-                  <option value="pressure">ðŸ“Š Pressure</option>
+                  <option value="temperature">🌡️ Temperature</option>
+                  <option value="humidity">💧 Humidity</option>
+                  <option value="soil_moisture">🌱 Soil Moisture</option>
+                  <option value="light_intensity">☀️ Light Intensity</option>
+                  <option value="pressure">📊 Pressure</option>
                 </select>
               </div>
 

@@ -5,10 +5,10 @@ import { useAuth } from '../context/AuthContext'
 import { formatVNDateTime } from '../utils/vnTime'
 
 const STATUS_LABELS = {
-  bot_active: 'Bot dang ho tro',
-  waiting_admin: 'Dang cho admin',
-  in_progress: 'Admin dang xu ly',
-  closed: 'Da dong',
+  bot_active: 'Bot đang hỗ trợ',
+  waiting_admin: 'Đang chờ admin',
+  in_progress: 'Admin đang xử lý',
+  closed: 'Đã đóng',
 }
 
 export default function SupportChat() {
@@ -66,6 +66,8 @@ export default function SupportChat() {
   const loadMessages = async (conversationId) => {
     if (!conversationId) return
     if (document.visibilityState === 'hidden') return
+    // Keep optimistic user message visible while waiting bot response.
+    if (loading) return
     if (messagesLoadingRef.current) return
     try {
       messagesLoadingRef.current = true
@@ -98,7 +100,7 @@ export default function SupportChat() {
     loadIssueTemplates()
     const interval = setInterval(() => {
       loadConversations()
-    }, 15000)
+    }, 8000)
     const templatesInterval = setInterval(() => {
       loadIssueTemplates()
     }, 60000)
@@ -111,13 +113,14 @@ export default function SupportChat() {
   useEffect(() => {
     loadMessages(selectedConversationId)
     if (!selectedConversationId) return
-    const interval = setInterval(() => loadMessages(selectedConversationId), 10000)
+    const interval = setInterval(() => loadMessages(selectedConversationId), 4000)
     return () => clearInterval(interval)
   }, [selectedConversationId])
 
   const sendUserMessage = async (contentOverride = null) => {
     const content = (contentOverride ?? message).trim()
     if (!content) return
+    setMessage('')
     const fallbackConversationId = selectedConversationId
     const optimisticMessage = {
       id: `temp-${Date.now()}`,
@@ -135,7 +138,6 @@ export default function SupportChat() {
         message: content,
       })
       const cid = res.data?.conversation_id || selectedConversationId
-      setMessage('')
       setShowOtherIssueInput(false)
       setOtherIssueText('')
       if (cid) setSelectedConversationId(cid)
@@ -372,7 +374,7 @@ export default function SupportChat() {
                   <p className="text-neon-cyan text-xs mt-1">User: {conv.user_name} {conv.user_email ? `(${conv.user_email})` : ''}</p>
                 )}
                 <p className="text-gray-400 text-xs mt-1 line-clamp-2">{conv.last_message_preview || 'No message yet'}</p>
-                <p className="text-gray-500 text-[11px] mt-1">{formatVNDateTime(conv.updated_at, true, { naiveAsUTC: true })} (GMT+7)</p>
+                <p className="text-gray-500 text-[11px] mt-1">{formatVNDateTime(conv.updated_at, true)} (GMT+7)</p>
               </button>
             ))}
             {conversations.length === 0 && <p className="text-gray-500 text-sm">No conversation yet.</p>}
@@ -393,10 +395,10 @@ export default function SupportChat() {
             {!isAdmin && selectedConversation && (
               <button
                 onClick={escalateToAdmin}
-                disabled={loading || selectedConversation.status === 'waiting_admin' || selectedConversation.status === 'in_progress'}
+                disabled={loading || selectedConversation.status === 'waiting_admin' || selectedConversation.status === 'in_progress' || selectedConversation.status === 'closed'}
                 className="px-3 py-2 rounded-lg bg-neon-yellow/15 text-neon-yellow border border-neon-yellow/40 hover:bg-neon-yellow/25 transition-all text-sm disabled:opacity-50"
               >
-                Chat voi admin
+                Chat với admin
               </button>
             )}
             {isAdmin && selectedConversation && selectedConversation.status !== 'closed' && (
@@ -432,7 +434,7 @@ export default function SupportChat() {
                     <div className="flex items-center gap-2 text-xs opacity-80 mb-1">
                       {icon}
                       <span className="capitalize">{msg.sender_type}</span>
-                      <span>{formatVNDateTime(msg.created_at, true, { naiveAsUTC: true })} (GMT+7)</span>
+                      <span>{formatVNDateTime(msg.created_at, true)} (GMT+7)</span>
                     </div>
                     <p className="whitespace-pre-wrap">{msg.content}</p>
                   </div>
@@ -446,7 +448,7 @@ export default function SupportChat() {
                     <Bot className="w-4 h-4" />
                     <span>bot</span>
                   </div>
-                  <p className="text-base text-gray-200 animate-pulse">Thinking</p>
+                  <p className="text-base text-gray-200 animate-pulse">Bot đang suy luận...</p>
                 </div>
               </div>
             )}
@@ -465,15 +467,21 @@ export default function SupportChat() {
               }}
               placeholder={isAdmin ? 'Reply to customer...' : 'Message bot or admin...'}
               className="flex-1 bg-dark-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:border-neon-cyan outline-none"
+              disabled={!isAdmin && selectedConversation?.status === 'closed'}
             />
             <button
               onClick={handleSend}
-              disabled={loading || !message.trim()}
+              disabled={loading || !message.trim() || (!isAdmin && selectedConversation?.status === 'closed')}
               className="px-4 py-2 rounded-lg bg-neon-cyan/20 border border-neon-cyan/50 text-neon-cyan hover:bg-neon-cyan/30 transition-all disabled:opacity-50"
             >
               <Send className="w-4 h-4" />
             </button>
           </div>
+          {!isAdmin && selectedConversation?.status === 'closed' && (
+            <p className="mt-2 text-xs text-amber-300">
+              Cuộc hội thoại này đã đóng. Hãy bấm <strong>New chat</strong> để tiếp tục trao đổi.
+            </p>
+          )}
 
           {!isAdmin && selectedConversation && (
             <div className="mt-3 border-t border-gray-700 pt-3">

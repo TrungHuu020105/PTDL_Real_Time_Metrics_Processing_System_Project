@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from urllib import parse as urlparse
 from urllib import request as urlrequest
@@ -52,23 +53,47 @@ def _candidate_models() -> list[str]:
     return candidates
 
 
+def _strip_accents(text: str) -> str:
+    normalized = unicodedata.normalize("NFD", text)
+    return "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+
+
+def _normalize_text(text: str) -> str:
+    raw = (text or "").lower().strip()
+    return _strip_accents(raw)
+
+
 def _summarize_user_context(db: Session, user: User) -> dict:
     sources = crud.get_user_accessible_sources(db, user.id)
+    limited_sources = sources[:6]
+
     devices = (
         db.query(IoTDevice)
         .filter(IoTDevice.user_id == user.id, IoTDevice.is_active == True)
         .order_by(IoTDevice.created_at.desc())
         .all()
     )
+
     latest_metrics = []
-    for source in sources[:6]:
-        row = (
+    if limited_sources:
+        rows = (
             db.query(Metric)
-            .filter(Metric.sensor_id == source)
-            .order_by(Metric.event_ts.desc())
-            .first()
+            .filter(Metric.sensor_id.in_(limited_sources))
+            .order_by(Metric.sensor_id.asc(), Metric.event_ts.desc())
+            .all()
         )
-        if row:
+        latest_by_source = {}
+        for row in rows:
+            if row.sensor_id in latest_by_source:
+                continue
+            latest_by_source[row.sensor_id] = row
+            if len(latest_by_source) == len(limited_sources):
+                break
+
+        for source in limited_sources:
+            row = latest_by_source.get(source)
+            if not row:
+                continue
             latest_metrics.append(
                 {
                     "source": row.sensor_id,
@@ -117,12 +142,14 @@ def _summarize_user_context(db: Session, user: User) -> dict:
 
 
 def _fallback_reply(user_message: str, context: dict) -> str:
-    if "cảnh báo" in user_message.lower():
+    normalized_message = _normalize_text(user_message)
+
+    if "canh bao" in normalized_message or "alert" in normalized_message:
         return (
             f"Mình thấy tài khoản của bạn có {context['alerts_last_24h_count']} alert trong 24h qua. "
             "Bạn có thể nói rõ sensor nào để mình hướng dẫn xử lý chi tiết hơn."
         )
-    if "sensor" in user_message.lower() or "thiết bị" in user_message.lower():
+    if "sensor" in normalized_message or "thiet bi" in normalized_message:
         device_names = [d["name"] for d in context["devices"][:4]]
         if not device_names:
             return "Hiện bạn chưa có sensor hoạt động. Bạn có thể vào IoT Devices để tạo hoặc bật sensor."

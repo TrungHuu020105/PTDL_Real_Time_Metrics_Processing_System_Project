@@ -21,6 +21,10 @@ from app.models import (
 from app.schemas import MetricCreate, AlertCreate, UserRegister, DeviceCreate
 
 
+def _now_vn() -> datetime:
+    return datetime.now(timezone(timedelta(hours=7)))
+
+
 def _resolve_metric_location(db: Session, sensor_id: str, location: Optional[str]) -> Optional[str]:
     """Resolve metric location: prefer provided location, fallback to IoT device location."""
     if location and location.strip():
@@ -789,13 +793,15 @@ def create_chat_conversation(
     status: str = "bot_active",
     subject: Optional[str] = None,
 ) -> ChatConversation:
-    now = datetime.now(timezone(timedelta(hours=7)))
+    now = _now_vn()
     row = ChatConversation(
         user_id=user_id,
         status=status,
         subject=subject,
         created_at=now,
         updated_at=now,
+        last_read_by_user_at=now if status == "bot_active" else None,
+        last_read_by_admin_at=None,
     )
     db.add(row)
     db.commit()
@@ -841,7 +847,7 @@ def update_chat_conversation_status(
     conversation.status = status
     if assigned_admin_id is not None:
         conversation.assigned_admin_id = assigned_admin_id
-    conversation.updated_at = datetime.now(timezone(timedelta(hours=7)))
+    conversation.updated_at = _now_vn()
     db.commit()
     db.refresh(conversation)
     return conversation
@@ -854,7 +860,7 @@ def create_chat_message(
     content: str,
     sender_id: Optional[int] = None,
 ) -> ChatMessage:
-    now = datetime.now(timezone(timedelta(hours=7)))
+    now = _now_vn()
     row = ChatMessage(
         conversation_id=conversation_id,
         sender_type=sender_type,
@@ -867,9 +873,25 @@ def create_chat_message(
     conversation = get_chat_conversation(db, conversation_id)
     if conversation:
         conversation.updated_at = now
+        if sender_type == "user":
+            conversation.last_read_by_user_at = now
+        elif sender_type in {"admin", "bot", "system"}:
+            conversation.last_read_by_admin_at = now
     db.commit()
     db.refresh(row)
     return row
+
+
+def mark_chat_conversation_as_read(db: Session, conversation: ChatConversation, actor_role: str) -> ChatConversation:
+    """Update read cursor for a conversation by actor role."""
+    now = _now_vn()
+    if actor_role == "admin":
+        conversation.last_read_by_admin_at = now
+    else:
+        conversation.last_read_by_user_at = now
+    db.commit()
+    db.refresh(conversation)
+    return conversation
 
 
 def list_chat_messages(db: Session, conversation_id: int) -> List[ChatMessage]:

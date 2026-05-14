@@ -210,6 +210,8 @@ class ChatConversation(Base):
     subject = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False, index=True)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone(timedelta(hours=7))), nullable=False, index=True)
+    last_read_by_user_at = Column(DateTime, nullable=True, index=True)
+    last_read_by_admin_at = Column(DateTime, nullable=True, index=True)
 
     def __repr__(self):
         return f"<ChatConversation(id={self.id}, user_id={self.user_id}, status={self.status})>"

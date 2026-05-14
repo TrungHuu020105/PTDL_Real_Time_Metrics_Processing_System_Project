@@ -923,7 +923,7 @@ export default function ServerStore() {
                 }}
                 className="px-3 py-2 rounded bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/40"
               >
-                Chi ti?t
+                Chi tiết
               </button>
               {rental.private_key_available && (
                 <button
@@ -2062,7 +2062,7 @@ export default function ServerStore() {
 
           {userViewTab === 'mine' && myRentedServerCards.length === 0 && (
             <div className="mt-10 text-center py-16 border border-gray-700 rounded-xl bg-dark-800/40">
-              <h3 className="text-xl font-semibold text-white mb-2">B?n chua thuê server nào</h3>
+              <h3 className="text-xl font-semibold text-white mb-2">Bạn chưa thuê server nào</h3>
               <p className="text-gray-400">Chuyển qua tab Cửa hàng để chọn server cần thuê.</p>
             </div>
           )}
@@ -2133,7 +2133,7 @@ export default function ServerStore() {
             <h2 className="text-2xl font-bold text-neon-cyan mb-2">
               {rentModal.action === 'rent' ? 'Xác nhận thuê server' : rentModal.action === 'download_key' ? 'Xác nhận tải private key' : 'Xác nhận hủy đăng ký'}
             </h2>
-            <p className="text-gray-400 mb-2">Mã b?o m?t: <span className="text-neon-yellow font-bold">{rentModal.code}</span></p>
+            <p className="text-gray-400 mb-2">Mã bảo mật: <span className="text-neon-yellow font-bold">{rentModal.code}</span></p>
             <p className="text-gray-500 mb-6">
               {rentModal.action === 'rent' ? 'Nhập đúng 6 số để hoàn tất thuê server.' : rentModal.action === 'download_key' ? 'Nhập đúng 6 số để tải lại private key.' : 'Nhập đúng 6 số để xác nhận hủy đăng ký server.'}
             </p>
@@ -2202,7 +2202,7 @@ export default function ServerStore() {
         return (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
             <div className="bg-dark-800 border border-neon-cyan/40 rounded-xl p-8 max-w-2xl w-full mx-4">
-              <h2 className="text-2xl font-bold text-neon-cyan mb-4">Chi ti?t server dang thuê</h2>
+              <h2 className="text-2xl font-bold text-neon-cyan mb-4">Chi tiết server đang thuê</h2>
               <div className="space-y-3 text-gray-200">
                 <div className="flex items-center gap-2">
                   <p>IP: {rental.ip}</p>
@@ -2395,7 +2395,7 @@ export default function ServerStore() {
                 onClick={closeSubscribersModal}
                 className="text-gray-400 hover:text-white transition-colors"
               >
-                ?
+                <X className="w-5 h-5" />
               </button>
             </div>
 

@@ -27,8 +27,28 @@ def _conversation_to_response(db: Session, conversation):
     messages = crud.list_chat_messages(db, conversation.id)
     owner = crud.get_user_by_id(db, conversation.user_id)
     last_preview = messages[-1].content[:120] if messages else ""
-    unread_for_user = len([m for m in messages if m.sender_type in {"admin", "system"}])
-    unread_for_admin = len([m for m in messages if m.sender_type == "user"])
+    unread_for_user = len(
+        [
+            m
+            for m in messages
+            if m.sender_type in {"admin", "system"}
+            and (
+                conversation.last_read_by_user_at is None
+                or (m.created_at and m.created_at > conversation.last_read_by_user_at)
+            )
+        ]
+    )
+    unread_for_admin = len(
+        [
+            m
+            for m in messages
+            if m.sender_type == "user"
+            and (
+                conversation.last_read_by_admin_at is None
+                or (m.created_at and m.created_at > conversation.last_read_by_admin_at)
+            )
+        ]
+    )
     return {
         "id": conversation.id,
         "user_id": conversation.user_id,
@@ -177,8 +197,10 @@ async def get_conversation_messages(
     _validate_conversation_access(conversation, current_user)
 
     messages = crud.list_chat_messages(db, conversation_id)
+    crud.mark_chat_conversation_as_read(db, conversation, actor_role=current_user.role)
+    refreshed_conversation = crud.get_chat_conversation(db, conversation_id)
     return {
-        "conversation": _conversation_to_response(db, conversation),
+        "conversation": _conversation_to_response(db, refreshed_conversation),
         "messages": messages,
         "count": len(messages),
     }
@@ -201,7 +223,7 @@ async def create_new_conversation(
         db=db,
         conversation_id=conversation.id,
         sender_type="system",
-        content="Da tao cuoc hoi thoai moi. Ban co the nhan van de de bat dau.",
+        content="Đã tạo cuộc hội thoại mới. Bạn có thể nhắn vấn đề để bắt đầu.",
     )
     return {"success": True, "conversation_id": conversation.id}
 
@@ -231,9 +253,11 @@ async def send_message(
     conversation = None
     if payload.conversation_id:
         conversation = crud.get_chat_conversation(db, payload.conversation_id)
-    if not conversation:
+    if conversation:
+        _validate_conversation_access(conversation, current_user)
+    if not conversation or conversation.status == "closed":
+        # Do not reopen closed conversations implicitly; start a fresh thread.
         conversation = crud.create_chat_conversation(db, user_id=current_user.id, status="bot_active", subject="User support")
-    _validate_conversation_access(conversation, current_user)
 
     user_message = crud.create_chat_message(
         db,
@@ -278,7 +302,7 @@ async def escalate_to_admin(
         conversation = crud.get_chat_conversation(db, payload.conversation_id)
     if not conversation:
         conversation = crud.get_latest_user_chat_conversation(db, current_user.id)
-    if not conversation:
+    if not conversation or conversation.status == "closed":
         conversation = crud.create_chat_conversation(db, user_id=current_user.id, status="waiting_admin", subject="Need admin support")
 
     _validate_conversation_access(conversation, current_user)
@@ -319,6 +343,8 @@ async def admin_reply(
     conversation = crud.get_chat_conversation(db, conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if conversation.status == "closed":
+        raise HTTPException(status_code=400, detail="Conversation is closed. Reopen flow is not supported.")
 
     crud.update_chat_conversation_status(
         db,
@@ -357,6 +383,6 @@ async def close_conversation(
         db,
         conversation_id=conversation.id,
         sender_type="system",
-        content="Admin đã đóng cuộc hội thoại. Bạn có thể tiếp tục chat với bot hoặc mở yêu cầu mới.",
+        content="Admin đã đóng cuộc hội thoại. Bạn có thể mở cuộc hội thoại mới để tiếp tục với bot hoặc gửi yêu cầu mới.",
     )
     return {"success": True, "conversation_id": conversation.id, "status": "closed"}

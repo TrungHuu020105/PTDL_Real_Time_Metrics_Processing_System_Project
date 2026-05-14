@@ -42,6 +42,8 @@ def get_db():
 def init_db():
     """Initialize database tables"""
     Base.metadata.create_all(bind=engine)
+    # Chat read-tracking is required by current API responses.
+    _ensure_chat_columns()
     if _is_schema_auto_migrate_enabled():
         _run_schema_evolution()
 
@@ -86,6 +88,20 @@ def _cleanup_metric_columns():
     """Best-effort cleanup for metrics table schema."""
     alter_statements = [
         "ALTER TABLE metrics DROP COLUMN IF EXISTS timezone_name",
+    ]
+    with engine.begin() as conn:
+        for sql in alter_statements:
+            try:
+                conn.exec_driver_sql(sql)
+            except Exception:
+                pass
+
+
+def _ensure_chat_columns():
+    """Best-effort schema evolution for chat_conversations read-tracking columns."""
+    alter_statements = [
+        "ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS last_read_by_user_at TIMESTAMP",
+        "ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS last_read_by_admin_at TIMESTAMP",
     ]
     with engine.begin() as conn:
         for sql in alter_statements:

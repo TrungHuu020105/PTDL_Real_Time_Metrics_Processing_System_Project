@@ -216,7 +216,7 @@ export default function AdminPanel() {
                 <p className="text-sm text-gray-400">{user.email}</p>
                 <p className="text-xs text-gray-500 mt-1">
                   Role: <span className="text-neon-yellow">{user.role}</span>
-                  {user.is_approved ? ' âœ“ Approved' : ' â³ Pending'}
+                  {user.is_approved ? ' ✓ Approved' : ' ⏳ Pending'}
                 </p>
               </div>
               {user.role !== 'admin' && (
@@ -237,7 +237,7 @@ export default function AdminPanel() {
       {activeTab === 'sensors' && (
         <div className="space-y-4">
           <div className="text-xs text-gray-400 bg-gray-900/50 p-3 rounded">
-            <p>ðŸ“Œ Demo sensors are disabled by default. Enable them to start generating metrics.</p>
+            <p>📌 Demo sensors are disabled by default. Enable them to start generating metrics.</p>
           </div>
           {devices.length === 0 ? (
             <p className="text-gray-400">No sensors found</p>
@@ -255,7 +255,7 @@ export default function AdminPanel() {
                         ? 'bg-green-500/20 text-green-400' 
                         : 'bg-red-500/20 text-red-400'
                     }`}>
-                      {device.is_active ? 'ðŸŸ¢ Active' : 'âš« Inactive'}
+                      {device.is_active ? '🟢 Active' : '⚫ Inactive'}
                     </span>
                   </div>
                   <p className="text-sm text-gray-400">{device.device_type}</p>

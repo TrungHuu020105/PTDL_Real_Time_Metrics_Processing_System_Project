@@ -43,6 +43,11 @@ GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
 
+# Model backend integration
+MODEL_BACKEND_URL = os.getenv("MODEL_BACKEND_URL", "http://127.0.0.1:8200").rstrip("/")
+MODEL_BACKEND_TOKEN = os.getenv("MODEL_BACKEND_TOKEN", "")
+MODEL_BACKEND_TIMEOUT = float(os.getenv("MODEL_BACKEND_TIMEOUT", "15"))
+
 
 def get_cors_origins() -> list[str]:
     """Return CORS origins from env. Supports comma-separated values."""

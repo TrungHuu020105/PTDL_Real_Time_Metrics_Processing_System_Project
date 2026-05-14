@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import init_db, SessionLocal
 from app.config import get_cors_origins
-from app.api import routes_auth, routes_admin, routes_servers, routes_chat
+from app.api import routes_auth, routes_admin, routes_servers, routes_chat, routes_model_proxy
 from app.crud import get_user_by_username, create_user
 from app.schemas import UserRegister
 from app.api.routes_auth import hash_password
@@ -35,6 +35,8 @@ app.include_router(routes_auth.router)
 app.include_router(routes_admin.router)
 app.include_router(routes_servers.router)
 app.include_router(routes_chat.router)
+app.include_router(routes_model_proxy.router)
+app.include_router(routes_model_proxy.dashboard_router)
 
 
 @app.get("/")

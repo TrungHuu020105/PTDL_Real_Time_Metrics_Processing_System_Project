@@ -110,6 +110,7 @@ export default function IoTDeviceManager() {
   const [addingDevice, setAddingDevice] = useState(false)
   const [latestMetrics, setLatestMetrics] = useState({})
   const [chartData, setChartData] = useState([])
+  const [shortForecast, setShortForecast] = useState([])
   const [chartLoading, setChartLoading] = useState(false)
   const [chartStats, setChartStats] = useState({
     average: 0,
@@ -369,6 +370,77 @@ export default function IoTDeviceManager() {
     return aggregatedData
   }
 
+  const mergeShortForecast = (actualData, predictions) => {
+    if (!actualData?.length) return actualData || []
+    const merged = actualData.map((point) => ({ ...point, predictedValue: null }))
+    const lastActual = merged[merged.length - 1]
+    const lastTs = Number(lastActual?.timestamp || 0)
+    if (!lastTs) return merged
+
+    if (predictions?.length) {
+      merged.push({
+        time: lastActual.time,
+        timestamp: lastTs,
+        value: null,
+        predictedValue: Number(lastActual.value),
+      })
+    }
+
+    for (const point of predictions || []) {
+      const ts = new Date(point?.timestamp)
+      const value = Number(point?.predicted_value ?? point?.predictedValue)
+      if (Number.isNaN(ts.getTime()) || Number.isNaN(value)) continue
+      if (ts.getTime() <= lastTs) continue
+      merged.push({
+        time: formatVNTime(ts),
+        timestamp: ts.getTime(),
+        value: null,
+        predictedValue: Number(value.toFixed(2)),
+      })
+    }
+
+    return merged.sort((a, b) => Number(a.timestamp) - Number(b.timestamp))
+  }
+
+  const buildLocalForecastFallback = (actualData) => {
+    if (!actualData?.length) return []
+    const points = [...actualData]
+    const last = points[points.length - 1]
+    const lastTs = Number(last.timestamp || Date.now())
+    const recent = points.slice(-6).map((item) => Number(item.value)).filter((v) => !Number.isNaN(v))
+    const slope = recent.length >= 2 ? (recent[recent.length - 1] - recent[0]) / (recent.length - 1) : 0
+    const predictions = []
+    for (let i = 1; i <= 6; i += 1) {
+      const ts = new Date(lastTs + i * 5 * 60 * 1000)
+      predictions.push({
+        timestamp: ts.toISOString(),
+        predicted_value: Number((Number(last.value) + slope * i).toFixed(2)),
+      })
+    }
+    return predictions
+  }
+
+  const fetchShortForecast = async (device, actualData) => {
+    try {
+      const response = await api.get('/api/model/metrics/predict', {
+        params: {
+          source: device.source,
+          metric_type: device.device_type,
+          horizon_minutes: 30,
+          step_minutes: 5,
+        },
+      })
+      const predictions = response?.data?.predictions || []
+      if (!predictions.length) {
+        return buildLocalForecastFallback(actualData)
+      }
+      return predictions
+    } catch (err) {
+      console.warn('Short forecast API failed, using local fallback:', err?.message || err)
+      return buildLocalForecastFallback(actualData)
+    }
+  }
+
   const fetchDeviceHistoryData = async (device, minutes = 120) => {
     if (historyEndpointSupportedRef.current) {
       try {
@@ -436,11 +508,14 @@ export default function IoTDeviceManager() {
         })
       }
       
-      setChartData(formattedData)
+      const forecastPredictions = await fetchShortForecast(device, formattedData)
+      setShortForecast(forecastPredictions)
+      setChartData(mergeShortForecast(formattedData, forecastPredictions))
       setChartLastUpdated(new Date())
     } catch (err) {
       console.error('Failed to fetch chart data:', err)
       setChartData([])
+      setShortForecast([])
       setChartStats({ average: 0, min: 0, max: 0 })
     } finally {
       setChartLoading(false)
@@ -473,7 +548,9 @@ export default function IoTDeviceManager() {
           })
         }
         
-        setChartData(formattedData)
+        const forecastPredictions = await fetchShortForecast(selectedDeviceForChart, formattedData)
+        setShortForecast(forecastPredictions)
+        setChartData(mergeShortForecast(formattedData, forecastPredictions))
         setChartLastUpdated(new Date())
         if (isDev) console.log('Chart updated at (VN):', formatVNTime(new Date(), true))
       } catch (err) {
@@ -1410,6 +1487,12 @@ export default function IoTDeviceManager() {
                 <p className="text-sm text-gray-400">
                   Last 2 hours of {selectedDeviceForChart.device_type} data
                 </p>
+                <p className="text-xs text-yellow-300 mt-1">
+                  Includes 30-minute short forecast (5-minute steps)
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Forecast points: {shortForecast.length}
+                </p>
                 {deviceOwners[selectedDeviceForChart.id] && (
                   <p className="text-xs text-gray-500 mt-2">
                     Created by: {deviceOwners[selectedDeviceForChart.id]}
@@ -1495,7 +1578,16 @@ export default function IoTDeviceManager() {
                         stroke="#00d4ff" 
                         dot={false}
                         strokeWidth={2}
-                        name={selectedDeviceForChart.device_type}
+                        name={`${selectedDeviceForChart.device_type} (actual)`}
+                      />
+                      <Line
+                        type="monotone"
+                        dataKey="predictedValue"
+                        stroke="#facc15"
+                        dot={false}
+                        strokeWidth={2}
+                        strokeDasharray="7 6"
+                        name="forecast (30m)"
                       />
                     </LineChart>
                   </ResponsiveContainer>
@@ -1513,6 +1605,7 @@ export default function IoTDeviceManager() {
                   setShowChartModal(false)
                   setSelectedDeviceForChart(null)
                   setChartData([])
+                  setShortForecast([])
                   setChartStats({ average: 0, min: 0, max: 0 })
                 }}
                 className="flex-1 px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-all"
